@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Rebalance Calculator</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#1a1d24; --line:#2b2f3a; --text:#e9ecf1;
+    --muted:#9aa3b2; --accent:#4f9dff; --good:#3ecf8e; --bad:#ff6b6b; --pill:#232733;
+    --hold:#c9a23a; --part:#b07bd6;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f4f6fa; --card:#ffffff; --line:#e2e6ee; --text:#10131a;
+           --muted:#5b6472; --accent:#1f6feb; --good:#1a9e6a; --bad:#d93636; --pill:#eef1f7;
+           --hold:#9a7a16; --part:#7d3fb0; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding:16px 14px 60px;-webkit-text-size-adjust:100%}
+  h1{font-size:20px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:14px;margin-bottom:14px}
+  label{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
+  input{width:100%;background:var(--pill);border:1px solid var(--line);color:var(--text);
+    border-radius:10px;padding:12px;font-size:17px;outline:none}
+  input:focus{border-color:var(--accent)}
+  input:disabled{opacity:.4}
+  .two{display:flex;gap:10px}.two>div{flex:1}
+  select{width:100%;background:var(--pill);border:1px solid var(--line);color:var(--text);
+    border-radius:10px;padding:12px;font-size:16px}
+  .chk{display:flex;align-items:center;gap:10px;margin:0;font-size:15px;color:var(--text)}
+  .chk input{width:20px;height:20px;flex:0 0 auto}
+
+  .asset{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:10px;background:var(--pill)}
+  .asset.hold{border-style:dashed}
+  .arow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .arow input.name{flex:1;font-size:16px}
+  .del{background:none;border:none;color:var(--muted);font-size:22px;line-height:1;
+    padding:0 2px;cursor:pointer;flex:0 0 auto}
+  .fields{display:flex;gap:8px}
+  .fld{flex:1}
+  .fld label{font-size:11px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px}
+  .fld input{padding:9px;font-size:16px}
+  .res{display:flex;justify-content:space-between;align-items:baseline;margin-top:9px;
+    font-variant-numeric:tabular-nums;font-size:14px}
+  .x.buy{color:var(--good)} .x.sell{color:var(--bad)} .x.hold{color:var(--hold)} .x.partial{color:var(--part)}
+  .endw{text-align:right;line-height:1.2}
+  .endw b{color:var(--text);font-size:18px;font-variant-numeric:tabular-nums}
+  .endw small{display:block;color:var(--muted);font-size:11px}
+  .bar{position:relative;height:6px;background:var(--line);border-radius:4px;margin-top:9px}
+  .fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--muted);transition:width .15s}
+  .fill.buy{background:var(--good)} .fill.sell{background:var(--bad)}
+  .fill.partial{background:var(--part)} .fill.hold{background:var(--hold)}
+  .tick{position:absolute;top:-3px;width:2px;height:12px;background:var(--text);border-radius:1px}
+
+  .add{width:100%;margin-top:4px;background:transparent;border:1px dashed var(--line);
+    color:var(--accent);border-radius:10px;padding:11px;font-size:15px;cursor:pointer}
+  .sums{color:var(--muted);font-size:12px;margin-top:10px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px}
+
+  .out{display:flex;justify-content:space-between;align-items:baseline;
+    padding:9px 0;border-bottom:1px solid var(--line)}
+  .out:last-child{border-bottom:none}
+  .out .k{color:var(--muted);font-size:14px}
+  .out .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+  .big .v{font-size:26px}
+  .note{color:var(--part);font-size:13px;margin:8px 0 0}
+  .warn{color:var(--bad);font-size:13px;margin:8px 0 0}
+  footer{color:var(--muted);font-size:12px;text-align:center;margin-top:18px;line-height:1.6}
+</style>
+</head>
+<body>
+  <h1>Rebalance Calculator</h1>
+  <p class="sub">Hit target weights. Blank target = hold. Selling and a cash cap are optional below.</p>
+
+  <div class="card">
+    <div class="two">
+      <div>
+        <label>Current invested (C)</label>
+        <input id="C" class="num" inputmode="decimal" placeholder="0">
+      </div>
+      <div>
+        <label>Weights as</label>
+        <select id="unit">
+          <option value="pct">Percent (%)</option>
+          <option value="frac">Fraction (0–1)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label class="chk"><input type="checkbox" id="noSell"> Avoid selling (buy-only)</label>
+    <label class="chk" style="margin-top:14px"><input type="checkbox" id="capOn"> Limit net new cash (S − C)</label>
+    <div style="margin-top:10px">
+      <input id="cap" class="num" inputmode="decimal" placeholder="max net cash to add" disabled>
+    </div>
+  </div>
+
+  <div id="rows"></div>
+  <button class="add" id="add">+ Add asset</button>
+  <div class="card" style="margin-top:14px">
+    <div class="sums" id="sums"></div>
+  </div>
+
+  <div class="card">
+    <div class="out big"><span class="k">Total to invest (S − C)</span><span class="v" id="total">—</span></div>
+    <div class="out"><span class="k">Portfolio after (S)</span><span class="v" id="S">—</span></div>
+    <p class="note" id="note" style="display:none"></p>
+    <p class="warn" id="warn" style="display:none"></p>
+  </div>
+
+  <footer>
+    xᵢ = tᵢ·S − wᵢ·C, &nbsp; S = C·(1−Σw)/(1−Σt) over rebalanced items.<br>
+    No-sell holds above-target assets (weight drifts down). Cap drops nearest target (|t−w|/t), then partly funds the last so S−C = cap.
+  </footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const KEY="rebalc_v3";
+const fmt=(n,d=2)=>(isFinite(n)?n:0).toLocaleString(undefined,{maximumFractionDigits:d,minimumFractionDigits:d});
+
+const blank=(name="")=>({name,w:"",t:""});
+let state=load()||{C:"",unit:"pct",noSell:true,capOn:false,cap:"",rows:[blank("Asset 1"),blank("Asset 2")]};
+if(state.noSell===undefined) state.noSell=true;
+
+function load(){try{return JSON.parse(localStorage.getItem(KEY))}catch(e){return null}}
+function save(){localStorage.setItem(KEY,JSON.stringify(state));}
+const esc=s=>String(s).replace(/"/g,"&quot;");
+const num=v=>{const n=parseFloat(v);return isFinite(n)?n:0;};
+const hasTarget=r=>String(r.t).trim()!=="";
+const div=()=>state.unit==="pct"?100:1;
+const relgap=r=>r.t===0?Infinity:Math.abs(r.t-r.w)/Math.abs(r.t);
+const EPS=1e-9;
+
+function render(){
+  $("C").value=state.C; $("unit").value=state.unit;
+  $("noSell").checked=!!state.noSell;
+  $("capOn").checked=!!state.capOn; $("cap").value=state.cap; $("cap").disabled=!state.capOn;
+  const box=$("rows"); box.innerHTML="";
+  state.rows.forEach((r,i)=>{
+    const el=document.createElement("div");
+    el.className="asset"+(hasTarget(r)?"":" hold");
+    el.innerHTML=`
+      <div class="arow">
+        <input class="name" data-i="${i}" data-k="name" placeholder="Name" value="${esc(r.name)}">
+        <button class="del" data-del="${i}" aria-label="Remove">×</button>
+      </div>
+      <div class="fields">
+        <div class="fld"><label>Now w</label>
+          <input class="num" data-i="${i}" data-k="w" inputmode="decimal" placeholder="0" value="${esc(r.w)}"></div>
+        <div class="fld"><label>Target t</label>
+          <input class="num" data-i="${i}" data-k="t" inputmode="decimal" placeholder="hold" value="${esc(r.t)}"></div>
+      </div>
+      <div class="res">
+        <span class="x" id="x${i}">—</span>
+        <span class="endw"><b id="f${i}">—</b><small id="g${i}"></small></span>
+      </div>
+      <div class="bar"><div class="fill" id="bf${i}"></div><div class="tick" id="bt${i}" style="display:none"></div></div>`;
+    box.appendChild(el);
+  });
+  compute();
+}
+
+function calcS(set,C){
+  let sw=0,st=0; set.forEach(r=>{sw+=r.w;st+=r.t;});
+  const S=set.length?C*(1-sw)/(1-st):C;
+  return {S,sw,st,N:S-C};
+}
+// Robust S: when targets fully specify the portfolio (Σt≈100%) the float
+// identity is degenerate (0/0) and net cash becomes a free choice.
+function solveS(set,C,ctx){
+  let sw=0,st=0; set.forEach(r=>{sw+=r.w;st+=r.t;});
+  if(!set.length) return C;
+  if(Math.abs(1-st)>EPS) return C*(1-sw)/(1-st);     // has floating rest bucket
+  if(ctx.capOn) return C+ctx.cap;                    // deploy exactly the cap
+  if(ctx.noSell){ let mx=0; set.forEach(r=>{ if(r.t>EPS) mx=Math.max(mx,r.w/r.t); }); return C*mx; } // min buy-only cash
+  return C;                                          // selling on → net-zero reshuffle
+}
+
+function compute(){
+  const C=num(state.C), d=div(), noSell=!!state.noSell, capOn=!!state.capOn, cap=num(state.cap);
+  const norm=state.rows.map((r,idx)=>({i:idx,w:num(r.w)/d,hasT:hasTarget(r),t:num(r.t)/d}));
+  const reb=norm.filter(r=>r.hasT);
+  const TOL=0.005; // 0.5pp tolerance on initial weights
+  const wSumAll=norm.reduce((a,r)=>a+r.w,0);
+
+  const ctx={noSell,capOn,cap};
+
+  // Phase 1 — no-sell: hold any asset that would need selling, recompute, repeat
+  let working=reb.slice();
+  const noSellHeld=new Set();
+  if(noSell){
+    let guard=0;
+    while(guard++<=reb.length){
+      const S=solveS(working,C,ctx);
+      let worst=null,wx=-EPS;
+      for(const r of working){ const x=r.t*S-r.w*C; if(x<wx){wx=x;worst=r;} }
+      if(!worst) break;
+      working=working.filter(z=>z.i!==worst.i); noSellHeld.add(worst.i);
+    }
+  }
+
+  // Phase 2 — cap on net new cash
+  let bw=0,bt=0; working.forEach(r=>{bw+=r.w;bt+=r.t;});
+  let Sfinal=solveS(working,C,ctx); const baseN=Sfinal-C;
+  let activeIds=new Set(working.map(r=>r.i)), boundaryId=null, partialT=null, mode="exact", capHeld=0;
+  const warns=[];
+  if(wSumAll>0 && Math.abs(wSumAll-1)>TOL)
+    warns.push(`Initial weights sum to ${fmt(wSumAll*100,2)}% — must be 100% (±${fmt(TOL*100,1)}pp). Fix inputs; results below are unreliable.`);
+  if(bt>1+EPS) warns.push(`Rebalanced targets sum to ${fmt(bt*100,1)}% (>100%). Lower a target or add a hold item.`);
+
+  if(capOn && isFinite(baseN) && bt<1-EPS && baseN>cap){
+    mode="capped";
+    const order=working.slice().sort((a,b)=>relgap(a)-relgap(b));
+    let active=working.slice(), removed=[];
+    while(removed.length<order.length && calcS(active,C).N>cap){
+      const drop=order[removed.length];
+      active=active.filter(r=>r.i!==drop.i);
+      removed.push(drop);
+    }
+    activeIds=new Set(active.map(r=>r.i));
+    const boundary=removed.length?removed[removed.length-1]:null;
+    capHeld=Math.max(0,removed.length-(boundary?1:0));
+    if(boundary){
+      boundaryId=boundary.i;
+      let sw2=0,st2=0; active.forEach(r=>{sw2+=r.w;st2+=r.t;});
+      Sfinal=C+cap;
+      let tp=1-st2-C*(1-sw2-boundary.w)/(C+cap);
+      const fl=boundary.w*C/Sfinal, lo=Math.min(fl,boundary.t), hi=Math.max(fl,boundary.t);
+      partialT=Math.max(lo,Math.min(hi,tp));
+    } else { Sfinal=calcS(active,C).S; }
+  }
+
+  let finSum=0,wSum=0,buys=0,sells=0;
+  const pf=v=>state.unit==="pct"?fmt(v*100,1)+"%":fmt(v,3);
+  norm.forEach(r=>{
+    const xe=$("x"+r.i), fe=$("f"+r.i); if(!xe)return;
+    let x=0,final,cls,txt;
+    const floatFin=r.w*C/Sfinal;
+    if(!r.hasT){ final=floatFin; cls="hold"; txt="hold"; }
+    else if(noSellHeld.has(r.i)){ final=floatFin; cls="hold"; txt="held — no sell"; }
+    else if(activeIds.has(r.i)){
+      x=r.t*Sfinal-r.w*C;
+      if(noSell && x<-EPS){ x=0; final=floatFin; cls="hold"; txt="held — no sell"; }
+      else { final=r.t; cls=x>=0?"buy":"sell"; txt=(x>=0?"buy +":"sell −")+fmt(Math.abs(x)); }
+    }
+    else if(r.i===boundaryId){
+      x=partialT*Sfinal-r.w*C;
+      if(noSell && x<-EPS){ x=0; final=floatFin; cls="hold"; txt="held — no sell"; }
+      else { final=partialT; cls="partial"; txt=(x>=0?"part. buy +":"part. sell −")+fmt(Math.abs(x)); }
+    }
+    else { final=floatFin; cls="hold"; txt="held — cap"; }
+    if(x>0)buys+=x; else sells+=-x;
+    finSum+=isFinite(final)?final:0; wSum+=r.w;
+    xe.textContent=txt; xe.className="x "+cls;
+    fe.textContent=isFinite(final)?pf(final):"—";
+    const ge=$("g"+r.i), bf=$("bf"+r.i), bt=$("bt"+r.i);
+    ge.textContent="now "+pf(r.w)+(r.hasT?" · tgt "+pf(r.t):"");
+    bf.className="fill "+cls;
+    bf.style.width=Math.max(0,Math.min(100,(isFinite(final)?final:0)*100))+"%";
+    if(r.hasT){ bt.style.display="block"; bt.style.left=Math.max(0,Math.min(100,r.t*100))+"%"; }
+    else bt.style.display="none";
+  });
+
+  $("S").textContent=isFinite(Sfinal)?fmt(Sfinal):"—";
+  $("total").textContent=isFinite(Sfinal)?(Sfinal-C>=0?"+":"−")+fmt(Math.abs(Sfinal-C)):"—";
+  $("sums").innerHTML=`<span>Σw now ${fmt(wSum*100,1)}%</span><span>buys ${fmt(buys)} · sells ${fmt(sells)}</span><span>Σ final ${fmt(finSum*100,1)}%</span>`;
+
+  const notes=[];
+  if(mode==="capped") notes.push(`Cap: net ${fmt(Sfinal-C)} = cap · ${capHeld} held${boundaryId!=null?" + 1 partial":""}`);
+  if(noSell && noSellHeld.size>0) notes.push(`${noSellHeld.size} above-target asset(s) held (no selling)`);
+  const nb=$("note");
+  if(notes.length){ nb.style.display="block"; nb.textContent=notes.join(" · "); } else nb.style.display="none";
+
+  const wb=$("warn");
+  if(warns.length){wb.style.display="block";wb.innerHTML=warns.map(w=>"⚠ "+w).join("<br>");}
+  else{wb.style.display="none";}
+}
+
+document.addEventListener("input",e=>{
+  const t=e.target;
+  if(t.id==="C") state.C=t.value;
+  else if(t.id==="cap") state.cap=t.value;
+  else if(t.dataset.i!=null){
+    const k=t.dataset.k, was=hasTarget(state.rows[+t.dataset.i]);
+    state.rows[+t.dataset.i][k]=t.value;
+    if(k==="t" && was!==hasTarget(state.rows[+t.dataset.i])){save();render();return;}
+  } else return;
+  save(); compute();
+});
+document.addEventListener("change",e=>{
+  if(e.target.id==="unit"){state.unit=e.target.value;save();render();}
+  else if(e.target.id==="capOn"){state.capOn=e.target.checked;save();render();}
+  else if(e.target.id==="noSell"){state.noSell=e.target.checked;save();compute();}
+});
+$("add").onclick=()=>{state.rows.push(blank("Asset "+(state.rows.length+1)));save();render();};
+document.addEventListener("click",e=>{
+  if(e.target.dataset.del!=null){state.rows.splice(+e.target.dataset.del,1);save();render();}
+});
+
+render();
+</script>
+</body>
+</html>
