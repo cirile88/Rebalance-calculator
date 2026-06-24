@@ -59,14 +59,23 @@ identity is degenerate and net cash becomes a free choice:
 - Warns if rebalanced targets sum to more than 100%.
 - The "Σ final" line confirms post-trade weights total 100%.
 
-## Develop & deploy
+## Files
 
-Just `index.html` — no build step.
+- `index.html` — markup and styling only.
+- `rebalance.js` — the pure math (`calcS`, `solveS`, `plan`). No DOM; runs in the
+  browser and in Node, so the page and the tests share identical logic.
+- `app.js` — DOM wiring: reads inputs, calls `Rebalance.plan`, renders results.
+- `test.js` — Node tests over `rebalance.js`.
+
+No build step — the browser loads the two scripts directly.
+
+## Develop, test & deploy
 
 ```bash
 git clone https://github.com/cirile88/Rebalance-calculator.git
 cd Rebalance-calculator
-# edit index.html, then:
+node test.js          # run the test suite
+# edit files, then:
 git add -A && git commit -m "update" && git push
 ```
 
