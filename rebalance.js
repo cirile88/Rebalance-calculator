@@ -119,7 +119,27 @@
     };
   }
 
-  const API = { EPS, TOL, relgap, calcS, solveS, plan };
+  // Convert per-asset native amounts into base-currency value C and weights.
+  // rows:  [{ amt, ccy }]  amt in its own currency; ccy is an ISO code.
+  // rates: { CCY: units-of-CCY-per-1-base }  (frankfurter `from=base` shape).
+  // The base currency itself need not appear in rates (its rate is 1).
+  // Returns { C, vals:[base-value per row], weights:[w per row], missing:[ccy,…] }.
+  function weightsFromAmounts(rows, rates, base) {
+    rates = rates || {};
+    const missing = [];
+    const vals = rows.map(r => {
+      const amt = r.amt || 0;
+      if (r.ccy === base) return amt;
+      const rate = rates[r.ccy];
+      if (!isFinite(rate) || rate <= 0) { if (r.ccy) missing.push(r.ccy); return NaN; }
+      return amt / rate; // amt(ccy) / (ccy per base) = base
+    });
+    const C = vals.reduce((a, v) => a + (isFinite(v) ? v : 0), 0);
+    const weights = vals.map(v => (C > 0 && isFinite(v) ? v / C : 0));
+    return { C, vals, weights, missing: Array.from(new Set(missing)) };
+  }
+
+  const API = { EPS, TOL, relgap, calcS, solveS, plan, weightsFromAmounts };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else global.Rebalance = API;
 })(typeof self !== "undefined" ? self : this);

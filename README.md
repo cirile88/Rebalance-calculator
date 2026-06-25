@@ -9,10 +9,12 @@ needs no backend.
 
 ## What it does
 
-You enter the portfolio value, then for each asset its current weight `w` and a
-target weight `t`. The tool returns, per asset:
+For each asset you enter its current **value in its own currency** and a target
+weight `t`. The tool converts every holding to a single base currency using live
+exchange rates, derives the current weights and portfolio total `C` for you, and
+returns per asset:
 
-- the trade `x` (buy / sell amount),
+- the trade `x` (buy / sell amount), in the base currency,
 - the resulting weight after the trade, shown as a bar with a target tick so you
   can see where you land,
 
@@ -20,10 +22,21 @@ plus the total cash to deploy and the portfolio value afterwards.
 
 ## Inputs
 
-- **C** — current invested amount (portfolio total).
-- **Weights as** — enter `w`/`t` as percent or as fractions (0–1).
-- **Now w / Target t** per asset. Leave a target **blank to hold** the asset
-  (it is never traded; its weight simply drifts as the rest changes).
+- **Base currency** — the currency all values, totals and trades are expressed in.
+- **Targets as** — enter `t` as percent or as fractions (0–1).
+- **Value + Cur / Target t** per asset. The value is in the asset's own currency;
+  the app converts it to the base currency to compute weights and the total `C`.
+  Leave a target **blank to hold** the asset (it is never traded; its weight
+  simply drifts as the rest changes).
+
+## Currency conversion
+
+Rates are fetched live from [frankfurter.app](https://frankfurter.app) (free, no
+API key) when the page loads and whenever you change the base currency. The last
+rates are cached on the device, so a cached set is used if you are briefly
+offline; the rate date is shown under the base-currency selector. Because weights
+are derived from converted values, they always sum to 100% — the old
+"weights must sum to 100%" check is no longer needed.
 
 ## Options
 

@@ -68,5 +68,41 @@ console.log("6) Targets > 100% → over-100 warning");
   check("targets-over warning present", r.warnings.some(w => w.code === "targets-over"));
 }
 
+console.log("7) weightsFromAmounts: multi-currency → base value + weights");
+{
+  // rates are CCY-per-1-base (frankfurter from=base). Base=CHF.
+  const rates = { EUR: 1.0842, USD: 1.2298 };
+  const rows = [
+    { amt: 1000, ccy: "CHF" },   // 1000 CHF
+    { amt: 1084.2, ccy: "EUR" }, // /1.0842 = 1000 CHF
+    { amt: 1229.8, ccy: "USD" }  // /1.2298 = 1000 CHF
+  ];
+  const c = R.weightsFromAmounts(rows, rates, "CHF");
+  check("C ≈ 3000 CHF", approx(c.C, 3000, 0.5));
+  check("equal weights ≈ 1/3", approx(c.weights[0], 1 / 3) && approx(c.weights[1], 1 / 3));
+  check("base row uses rate 1", approx(c.vals[0], 1000));
+  check("no missing currencies", c.missing.length === 0);
+}
+
+console.log("8) weightsFromAmounts: unknown currency flagged + excluded");
+{
+  const c = R.weightsFromAmounts(
+    [{ amt: 100, ccy: "CHF" }, { amt: 100, ccy: "XYZ" }], {}, "CHF");
+  check("XYZ reported missing", c.missing.length === 1 && c.missing[0] === "XYZ");
+  check("C only counts known (100)", approx(c.C, 100));
+  check("known asset weight = 100%", approx(c.weights[0], 1));
+}
+
+console.log("9) Derived weights feed plan cleanly (no weights-sum warning)");
+{
+  const rates = { EUR: 1.0842 };
+  const c = R.weightsFromAmounts(
+    [{ amt: 5000, ccy: "CHF" }, { amt: 5421, ccy: "EUR" }], rates, "CHF");
+  const r = R.plan({ C: c.C, noSell: false, capOn: false, cap: 0,
+    rows: [{ w: c.weights[0], t: 0.5 }, { w: c.weights[1], t: 0.5 }] });
+  check("no weights-sum warning", r.warnings.every(w => w.code !== "weights-sum"));
+  check("net ≈ 0 (already balanced)", approx(r.net, 0, 1));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
