@@ -144,6 +144,8 @@ function paint() {
   const msgs = [];
   (res.warnings || []).forEach(w => {
     if (w.code === "cash-over-total") msgs.push(`Cash to invest exceeds the total S.`);
+    if (w.code === "weights-sum") msgs.push(`Current weights sum to ${fmt(w.value * BP, 0)} bp (should be 10000). Check your entries.`);
+    if (w.code === "targets-sum") msgs.push(`Target weights sum to ${fmt(w.value * BP, 0)} bp — over 100%. Lower your targets.`);
   });
   if (msgs.length) { wb.style.display = "block"; wb.innerHTML = msgs.map(m => "⚠ " + m).join("<br>"); }
   else wb.style.display = "none";

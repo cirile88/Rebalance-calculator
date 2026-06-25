@@ -341,8 +341,15 @@
       return { i: r.i, action: act.get(r.i) || "hold-blank", x, fee: Math.abs(x) > EPS ? fee : 0, final, w: r.w, t: r.t, hasT: r.hasT };
     });
 
+    const wSum = norm.reduce((a, r) => a + r.w, 0);
+    const tSum = norm.reduce((a, r) => a + (r.hasT ? r.t : 0), 0);
     const warnings = [];
     if (C < -EPS) warnings.push({ code: "cash-over-total" });
+    // Only flag a weights mismatch when targets ≈ 100% (i.e. a full-portfolio
+    // rebalance is intended); a deliberate subset has tSum < 100% and is left alone.
+    const fullPortfolio = Math.abs(tSum - 1) <= TOL;
+    if (fullPortfolio && wSum > EPS && Math.abs(wSum - 1) > TOL) warnings.push({ code: "weights-sum", value: wSum });
+    if (tSum > 1 + TOL) warnings.push({ code: "targets-sum", value: tSum }); // over-allocated: always invalid
     const rationed = rows.some(r => r.action === "partial" || r.action === "hold-cash");
     return { S, C, cash, net: buys - sells, leftover: Math.max(0, budget), buys, sells, fees, desiredBuys, rationed, finSum, rows, warnings };
   }
