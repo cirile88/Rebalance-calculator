@@ -1,10 +1,10 @@
 // DOM wiring: state, persistence, rendering. All math lives in rebalance.js.
 const $ = id => document.getElementById(id);
-const KEY = "rebalc_v3";
+const KEY = "rebalc_v4";
 const fmt = (n, d = 2) => (isFinite(n) ? n : 0).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 
 const blank = (name = "") => ({ name, w: "", t: "", ccy: "" });
-let state = load() || { C: "", unit: "pct", noSell: true, capOn: false, cap: "", base: "CHF", rows: [blank("Asset 1"), blank("Asset 2")] };
+let state = load() || { T: "", S: "", unit: "pct", noSell: true, base: "CHF", rows: [blank("Asset 1"), blank("Asset 2")] };
 if (state.noSell === undefined) state.noSell = true;
 if (!state.base) state.base = "CHF";
 
@@ -51,10 +51,9 @@ const hasTarget = r => String(r.t).trim() !== "";
 const div = () => (state.unit === "pct" ? 100 : 1);
 
 function render() {
-  $("C").value = state.C; $("unit").value = state.unit;
+  $("inT").value = state.T; $("inS").value = state.S; $("unit").value = state.unit;
   $("base").innerHTML = ccyOptions(state.base);
   $("noSell").checked = !!state.noSell;
-  $("capOn").checked = !!state.capOn; $("cap").value = state.cap; $("cap").disabled = !state.capOn;
   const box = $("rows"); box.innerHTML = "";
   state.rows.forEach((r, i) => {
     const el = document.createElement("div");
@@ -93,16 +92,11 @@ const actionClass = a => (a === "buy" || a === "sell" || a === "partial" ? a : "
 
 function paint() {
   const d = div();
-  const C = num(state.C);
-  const weights = state.rows.map(r => ({ w: num(r.w) / d, t: hasTarget(r) ? num(r.t) / d : null }));
-  const wSum = weights.reduce((a, r) => a + r.w, 0);
-  // IBKR weights include uninvested cash, so they sum to <100%; treat the gap as
-  // deployable cash and switch to the buy-only cash model.
-  const cashMode = wSum > 0 && wSum < 1 - Rebalance.TOL;
-
-  const res = cashMode
-    ? Rebalance.planCash({ C, fee: FEE, rows: weights })
-    : Rebalance.plan({ C, noSell: !!state.noSell, capOn: !!state.capOn, cap: num(state.cap), rows: weights });
+  const T = num(state.T), S = num(state.S);
+  const res = Rebalance.planInvest({
+    T, S, fee: FEE, noSell: !!state.noSell,
+    rows: state.rows.map(r => ({ w: num(r.w) / d, t: hasTarget(r) ? num(r.t) / d : null }))
+  });
 
   const pf = v => (state.unit === "pct" ? fmt(v * 100, 1) + "%" : fmt(v, 3));
 
@@ -127,47 +121,33 @@ function paint() {
     else bt.style.display = "none";
   });
 
+  $("total").textContent = isFinite(res.net) ? "+" + fmt(res.net) + " " + state.base : "—";
   $("S").textContent = isFinite(res.S) ? fmt(res.S) + " " + state.base : "—";
-
-  if (cashMode) {
-    $("total").textContent = isFinite(res.deployed) ? "+" + fmt(res.deployed) + " " + state.base : "—";
-    $("sums").innerHTML =
-      `<span>Σw ${fmt(res.wSum * 100, 1)}% · cash ${fmt((1 - res.wSum) * 100, 1)}%</span>` +
-      `<span>deploy ${fmt(res.deployed)} · fees ${fmt(res.fees)}</span>` +
-      `<span>cash left ${fmt(res.cashAfter)} ${state.base}</span>`;
-  } else {
-    $("total").textContent = isFinite(res.S) ? (res.net >= 0 ? "+" : "−") + fmt(Math.abs(res.net)) + " " + state.base : "—";
-    $("sums").innerHTML = `<span>Σw now ${fmt(res.wSum * 100, 1)}%</span>` +
-      `<span>buys ${fmt(res.buys)} · sells ${fmt(res.sells)}</span>` +
-      `<span>Σ final ${fmt(res.finSum * 100, 1)}%</span>`;
-  }
+  $("sums").innerHTML =
+    `<span>budget ${fmt(res.budget)} · need ${fmt(res.desiredNet)}</span>` +
+    `<span>buys ${fmt(res.buys)} · sells ${fmt(res.sells)}</span>` +
+    `<span>fees ${fmt(res.fees)} · cash left ${fmt(res.cashAfter)} ${state.base}</span>`;
 
   const notes = [];
-  if (cashMode) {
-    notes.push(`${fmt((1 - res.wSum) * 100, 1)}% uninvested cash (${fmt(res.cash)} ${state.base}) deployed buy-only`);
-    notes.push(`${fmt(FEE)} ${state.base} reserved per trade`);
-    if (res.mode === "cash-short") notes.push(`cash short of all targets — most-underweight funded first`);
-  } else {
-    if (res.mode === "capped") notes.push(`Cap: net ${fmt(res.net)} = cap · ${res.capHeld} held${res.partialCount ? " + 1 partial" : ""}`);
-    if (state.noSell && res.noSellHeldCount > 0) notes.push(`${res.noSellHeldCount} above-target asset(s) held (no selling)`);
-  }
+  if (state.noSell && res.rows.some(r => r.action === "hold-over"))
+    notes.push("buy-only: overweight assets held (not sold)");
+  notes.push(`${fmt(FEE)} ${state.base} reserved per trade`);
   const nb = $("note");
   if (notes.length) { nb.style.display = "block"; nb.textContent = notes.join(" · "); } else nb.style.display = "none";
 
   const wb = $("warn");
-  const msgs = (res.warnings || []).map(w => {
-    if (w.code === "weights-sum") return `Initial weights sum to ${fmt(w.value * 100, 2)}% — must be 100% (±0.5pp). Fix inputs; results below are unreliable.`;
-    if (w.code === "targets-over") return `Targets sum to ${fmt(w.value * 100, 1)}% (>100%). Lower a target.`;
-    return "";
-  }).filter(Boolean);
+  const msgs = [];
+  if (res.mode === "over-budget")
+    msgs.push(`Targets need ${fmt(res.desiredNet)} ${state.base} but your budget S is ${fmt(res.budget)} (fees ${fmt(res.fees)}). Buys scaled down to fit.`);
+  (res.warnings || []).forEach(w => { if (w.code === "target-over") msgs.push(`A target exceeds 100% of the total.`); });
   if (msgs.length) { wb.style.display = "block"; wb.innerHTML = msgs.map(m => "⚠ " + m).join("<br>"); }
   else wb.style.display = "none";
 }
 
 document.addEventListener("input", e => {
   const t = e.target;
-  if (t.id === "C") state.C = t.value;
-  else if (t.id === "cap") state.cap = t.value;
+  if (t.id === "inT") state.T = t.value;
+  else if (t.id === "inS") state.S = t.value;
   else if (t.dataset.i != null) {
     const k = t.dataset.k, was = hasTarget(state.rows[+t.dataset.i]);
     state.rows[+t.dataset.i][k] = t.value;
@@ -178,7 +158,6 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   if (e.target.id === "unit") { state.unit = e.target.value; save(); render(); }
   else if (e.target.id === "base") { state.base = e.target.value; save(); render(); fetchRates(); }
-  else if (e.target.id === "capOn") { state.capOn = e.target.checked; save(); render(); }
   else if (e.target.id === "noSell") { state.noSell = e.target.checked; save(); paint(); }
   else if (e.target.dataset.i != null && e.target.dataset.k === "ccy") {
     state.rows[+e.target.dataset.i].ccy = e.target.value; save(); paint();

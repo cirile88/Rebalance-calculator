@@ -108,5 +108,56 @@ console.log("10) Blank target holds; cash buffer kept when targets < 100%");
   check("leftover cash buffer ≈ 1000", approx(r.cashAfter, 1000));
 }
 
+console.log("11) Invest: moves are (t−w)·T; deploy exactly S");
+{
+  // T=100, S=20. A 20→30 (+10), B 30→40 (+10) → deploys 20 = S.
+  const r = R.planInvest({ T: 100, S: 20, fee: 0, noSell: false, rows: P([[20, 30], [30, 40]]) });
+  check("A buy 10", r.rows[0].action === "buy" && approx(r.rows[0].x, 10));
+  check("B buy 10", r.rows[1].action === "buy" && approx(r.rows[1].x, 10));
+  check("net deployed = S (20)", approx(r.net, 20));
+  check("not over budget", r.mode === "ok");
+  check("cash left ≈ 0", approx(r.cashAfter, 0));
+  check("A final = 30%", approx(r.rows[0].final, 0.30));
+}
+
+console.log("12) Invest: a subset is rebalanced, the rest is held (not cash)");
+{
+  // Only A listed (20→35). The unlisted rest of the account is untouched.
+  const r = R.planInvest({ T: 100, S: 20, fee: 0, noSell: false, rows: P([[20, 35]]) });
+  check("only one row computed", r.rows.length === 1);
+  check("A buy 15", r.rows[0].action === "buy" && approx(r.rows[0].x, 15));
+  check("net = 15 (≤ S)", approx(r.net, 15));
+  check("cash left = 5", approx(r.cashAfter, 5));
+}
+
+console.log("13) Invest: S is a hard budget — buys scale down to fit");
+{
+  // A 20→50 wants +30 but only 20 available → scaled to 20.
+  const r = R.planInvest({ T: 100, S: 20, fee: 0, noSell: true, rows: P([[20, 50]]) });
+  check("desired net = 30", approx(r.desiredNet, 30));
+  check("flagged over-budget", r.mode === "over-budget");
+  check("A partial, scaled to 20", r.rows[0].action === "partial" && approx(r.rows[0].x, 20));
+  check("net = S (20)", approx(r.net, 20));
+}
+
+console.log("14) Invest: 2/trade fee reserved from the budget");
+{
+  // A +15, B +10 → wants 25; budget 20−4 fees = 16 → buys scaled to 16.
+  const r = R.planInvest({ T: 100, S: 20, fee: 2, noSell: true, rows: P([[20, 35], [30, 40]]) });
+  check("fees = 4 (2 trades)", approx(r.fees, 4));
+  check("over budget", r.mode === "over-budget");
+  check("net scaled to 16", approx(r.net, 16));
+  check("cash left ≈ 0", approx(r.cashAfter, 0));
+}
+
+console.log("15) Invest buy-only: overweight asset is held, not sold");
+{
+  // A 20→40 (+20), B 50→30 would sell → held.
+  const r = R.planInvest({ T: 100, S: 50, fee: 0, noSell: true, rows: P([[20, 40], [50, 30]]) });
+  check("A buys 20", r.rows[0].action === "buy" && approx(r.rows[0].x, 20));
+  check("B held (overweight)", r.rows[1].action === "hold-over" && r.rows[1].x === 0);
+  check("no sells", approx(r.sells, 0));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

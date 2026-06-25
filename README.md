@@ -9,25 +9,36 @@ needs no backend.
 
 ## What it does
 
-You enter the portfolio value `C` in a base currency, then for each asset its
-current weight `w`, a target weight `t`, and the currency you trade it in. The
-tool returns, per asset:
+You enter your **whole account total** `S + C` (the value after any cash you're
+adding), the **cash to invest** `S`, and for each asset you want to rebalance its
+current weight `w`, target weight `t`, and trading currency — all weights expressed
+over the full account, exactly as a broker like IBKR shows them. The tool returns,
+per asset:
 
-- the trade `x` (buy / sell amount), in the base currency, plus its size in the
-  asset's own currency (e.g. `buy +1,000 CHF (≈ 1,090 EUR)`),
-- the resulting weight after the trade, shown as a bar with a target tick so you
-  can see where you land,
+- the trade `x = (t − w)·(S+C)`, in the base currency, plus its size in the asset's
+  own currency (e.g. `buy +1,000 CHF (≈ 1,090 EUR)`),
+- the resulting weight after the trade, shown as a bar with a target tick,
 
-plus the total cash to deploy and the portfolio value afterwards.
+plus the cash actually deployed and the account total afterwards.
+
+Two design points that matter:
+
+- **Only listed assets are traded; everything else is held.** You can rebalance a
+  subset — unlisted holdings (and rows with a blank target) are never touched and
+  are never assumed to be cash.
+- **`S` is a hard budget.** If your targets would need more new cash than `S`
+  (after reserving fees), the buys are scaled down proportionally to fit, and a
+  warning is shown.
 
 ## Inputs
 
-- **C** — current invested amount (portfolio total), in the base currency.
-- **Weights as** — enter `w`/`t` as percent or as fractions (0–1).
-- **Base currency** — the currency `C` and `S` are expressed in.
-- **Now w / Target t / currency** per asset. Leave a target **blank to hold** the
-  asset (it is never traded; its weight simply drifts as the rest changes). The
-  per-asset currency only sets how the order size is shown; the math is unchanged.
+- **Total after cash (S + C)** — the account value once your new cash is in it.
+- **Cash to invest (S)** — the budget; net buys won't exceed it.
+- **Targets as** — enter `w`/`t` as percent or as fractions (0–1).
+- **Base currency** — the currency totals and trades are expressed in.
+- **Now w / Target t / currency** per asset, all weights **over the full account**.
+  Leave a target **blank to hold**. The per-asset currency only sets how the order
+  size is displayed; the math is unchanged.
 
 ## Currency conversion
 
@@ -39,66 +50,40 @@ unavailable, totals and trades are still correct, just shown in the base currenc
 The `.dev` host is used directly because the older `.app` host 301-redirects and
 the redirect drops CORS headers, which fails the fetch in the browser.
 
-## Uninvested cash (IBKR deposits)
+## Fees
 
-Brokers like IBKR compute each holding's weight over the **whole account**, so a
-fresh cash deposit makes the listed weights sum to **less than 100%** by design —
-the gap is uninvested cash. When the entered weights sum to under 100% (beyond the
-0.5pp tolerance), the tool switches to a **cash-deployment** model:
-
-- the gap `(1 − Σw)·C` is treated as cash to deploy, not a held position;
-- deployment is **buy-only** — it funds under-target assets; over-target assets are
-  held (they can't be sold), so they show as "held — above tgt";
-- the **total is unchanged** (no external money assumed); "Total to invest" is the
-  cash actually deployed;
-- a flat **2 (base currency) buffer is reserved per suggested trade** to cover
-  commissions, so the plan doesn't push your cash negative on fees;
-- if the cash can't fund every target, the **most-underweight** asset is funded
-  first and the last is partially funded ("cash short" note).
-
-This replaces the old "weights must sum to 100%" warning, which fired spuriously on
-broker weights and could suggest wrong (often under-deployed) trades.
+A flat **2 (base currency) is reserved per suggested trade** as a commission
+buffer, deducted from the budget `S` before sizing buys, so the plan never spends
+cash it doesn't have on fees.
 
 ## Options
 
-- **Avoid selling (buy-only).** Any asset already above its target can't be sold,
-  so it is held and its weight is diluted down as you buy the others; only the
-  underweight assets are bought.
-- **Limit net new cash (cap).** Caps `S − C`. If the targets need more cash than
-  the cap, assets nearest their target (by relative gap `|t − w| / t`) are dropped
-  to "hold" one by one until the spend fits; the last dropped asset is then
-  partially funded so the spend equals the cap exactly.
+- **Avoid selling (buy-only).** Any asset above its target can't be sold; it is
+  held (shown as "held — above tgt") and only the underweight assets are bought.
 
 ## The model
 
-For the rebalanced assets, with held/unlisted assets forming the rest:
+All weights are over the full account total `T = S + C`. For each listed asset:
 
 ```
-S  = C · (1 − Σw) / (1 − Σt)      (total after rebalancing)
-xᵢ = tᵢ · S − wᵢ · C             (trade for asset i; negative = sell)
-net new cash = S − C
+xᵢ = (tᵢ − wᵢ) · T            (trade for asset i; negative = sell)
 ```
 
-When the targets fully specify the portfolio (`Σt ≈ 100%`, no held bucket) the
-identity is degenerate and net cash becomes a free choice:
-
-- selling allowed, no cap → `S = C` (net-zero reshuffle),
-- buy-only → `S = C · max(wᵢ / tᵢ)` (minimum cash so nothing must be sold),
-- cap on → `S = C + cap`.
+Unlisted assets (and blank-target rows) are held. Net new cash = Σ buys − Σ sells.
+If that exceeds the budget `S` (after fees), every buy is multiplied by
+`(S − fees + sells) / buys` so the net spend equals `S` exactly.
 
 ## Checks
 
-- Initial weights must sum to **100% (±0.5pp)**; otherwise the result is flagged
-  as unreliable.
-- Warns if rebalanced targets sum to more than 100%.
-- The "Σ final" line confirms post-trade weights total 100%.
+- Warns when targets need more new cash than the budget `S` (buys are scaled to
+  fit), and if any single target exceeds 100% of the account.
 
 ## Files
 
 - `index.html` — markup and styling only.
-- `rebalance.js` — the pure math (`calcS`, `solveS`, `plan`). No DOM; runs in the
-  browser and in Node, so the page and the tests share identical logic.
-- `app.js` — DOM wiring: reads inputs, calls `Rebalance.plan`, renders results.
+- `rebalance.js` — the pure math (`planInvest`, plus the older `plan`/`planCash`).
+  No DOM; runs in the browser and in Node, so the page and tests share logic.
+- `app.js` — DOM wiring: reads inputs, calls `Rebalance.planInvest`, renders.
 - `test.js` — Node tests over `rebalance.js`.
 
 No build step — the browser loads the two scripts directly.

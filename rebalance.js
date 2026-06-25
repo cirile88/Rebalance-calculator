@@ -184,7 +184,67 @@
     return { S: Sfinal, deployed, fees, cash, cashAfter, finSum, wSum, mode, rows, warnings };
   }
 
-  const API = { EPS, TOL, relgap, calcS, solveS, plan, planCash };
+  // Subset-rebalance with an explicit invest budget. All weights are over the
+  // FULL account total T (= S + C, i.e. value AFTER adding the cash) — the figures
+  // a broker shows. Only listed assets are traded; everything else (unlisted, or
+  // rows with a blank target) is HELD, never assumed to be cash. The trade to put
+  // a listed asset on target is simply (t − w)·T. `S` is a HARD BUDGET on net new
+  // cash (buys − sells): if the targets would spend more than S (after reserving a
+  // flat `fee` per trade), the buys are scaled down proportionally to fit.
+  //
+  // input:  { T, S, fee, noSell, rows:[{ w, t }] }   w,t fractions over T; t null/""=hold
+  // output: { S:Tfinal, T, budget, desiredNet, net, buys, sells, fees, cashAfter,
+  //           mode, scale, rows:[{ i, action, x, fee, final, w, t, hasT }], warnings }
+  // action ∈ buy | sell | partial | hold-over | hold-on-target | hold-blank
+  function planInvest(input) {
+    const T = input.T, S = input.S || 0, fee = input.fee || 0, noSell = !!input.noSell;
+    const norm = input.rows.map((r, i) => {
+      const hasT = r.t != null && r.t !== "";
+      return { i, w: r.w || 0, hasT, t: hasT ? r.t : 0 };
+    });
+
+    // Desired move per listed asset: (t − w)·T. Buy-only holds would-be sells.
+    const mv = norm.map(r => {
+      if (!r.hasT) return { r, x: 0, action: "hold-blank" };
+      let x = (r.t - r.w) * T;
+      if (Math.abs(x) <= EPS) return { r, x: 0, action: "hold-on-target" };
+      if (noSell && x < 0) return { r, x: 0, action: "hold-over" };
+      return { r, x, action: x > 0 ? "buy" : "sell" };
+    });
+
+    let buys = 0, sells = 0, nTrades = 0;
+    mv.forEach(m => { if (m.x > EPS) { buys += m.x; nTrades++; } else if (m.x < -EPS) { sells += -m.x; nTrades++; } });
+    const fees = nTrades * fee;
+    const desiredNet = buys - sells;            // external cash the targets would need
+    const budget = S - fees;                    // spendable after reserving fees
+
+    let mode = "ok", scale = 1;
+    if (desiredNet > budget + EPS) {            // over budget → scale buys to fit S
+      mode = "over-budget";
+      const targetBuys = Math.max(0, budget + sells);
+      scale = buys > EPS ? targetBuys / buys : 0;
+      mv.forEach(m => { if (m.x > EPS) { m.x *= scale; m.action = "partial"; } });
+      buys = targetBuys;
+    }
+
+    const net = buys - sells;
+    const Tfinal = T - fees;                    // fees leave the account
+    const rows = norm.map((r, idx) => {
+      const m = mv[idx], traded = Math.abs(m.x) > EPS;
+      const final = (r.w * T + m.x) / Tfinal;
+      return { i: r.i, action: m.action, x: m.x, fee: traded ? fee : 0, final, w: r.w, t: r.t, hasT: r.hasT };
+    });
+
+    const warnings = [];
+    norm.forEach(r => { if (r.hasT && r.t > 1 + EPS) warnings.push({ code: "target-over", value: r.t }); });
+
+    return {
+      S: Tfinal, T, budget: S, desiredNet, net, buys, sells, fees,
+      cashAfter: S - net - fees, mode, scale, rows, warnings
+    };
+  }
+
+  const API = { EPS, TOL, relgap, calcS, solveS, plan, planCash, planInvest };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else global.Rebalance = API;
 })(typeof self !== "undefined" ? self : this);

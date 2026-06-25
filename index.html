@@ -73,40 +73,40 @@
 </head>
 <body>
   <h1>Rebalance Calculator</h1>
-  <p class="sub">Hit target weights. Blank target = hold. Selling and a cash cap are optional below.</p>
+  <p class="sub">Weights are over your whole account (S + C). Blank target = hold. Unlisted holdings stay put.</p>
 
   <div class="card">
     <div class="two">
       <div>
-        <label>Current invested (C)</label>
-        <input id="C" class="num" inputmode="decimal" placeholder="0">
+        <label>Total after cash (S + C)</label>
+        <input id="inT" class="num" inputmode="decimal" placeholder="account total">
       </div>
       <div>
-        <label>Weights as</label>
+        <label>Cash to invest (S)</label>
+        <input id="inS" class="num" inputmode="decimal" placeholder="budget">
+      </div>
+    </div>
+    <div class="two" style="margin-top:10px">
+      <div>
+        <label>Targets as</label>
         <select id="unit">
           <option value="pct">Percent (%)</option>
           <option value="frac">Fraction (0–1)</option>
         </select>
       </div>
-    </div>
-    <div class="two" style="margin-top:10px">
       <div>
-        <label>Base currency (C, S)</label>
+        <label>Base currency</label>
         <select id="base"></select>
       </div>
-      <div>
-        <label>Live FX (ECB daily) <button id="fxref" class="del" style="font-size:16px" aria-label="Refresh rates">↻</button></label>
-        <div id="fxstatus" style="font-size:12px;color:var(--muted);padding-top:11px">loading…</div>
-      </div>
     </div>
+    <p class="sub" style="margin:8px 0 0;display:flex;align-items:center;gap:8px">
+      <span id="fxstatus">loading…</span>
+      <button id="fxref" class="del" style="font-size:16px" aria-label="Refresh rates">↻</button>
+    </p>
   </div>
 
   <div class="card">
     <label class="chk"><input type="checkbox" id="noSell"> Avoid selling (buy-only)</label>
-    <label class="chk" style="margin-top:14px"><input type="checkbox" id="capOn"> Limit net new cash (S − C)</label>
-    <div style="margin-top:10px">
-      <input id="cap" class="num" inputmode="decimal" placeholder="max net cash to add" disabled>
-    </div>
   </div>
 
   <div id="rows"></div>
@@ -116,15 +116,15 @@
   </div>
 
   <div class="card">
-    <div class="out big"><span class="k">Total to invest (S − C)</span><span class="v" id="total">—</span></div>
-    <div class="out"><span class="k">Portfolio after (S)</span><span class="v" id="S">—</span></div>
+    <div class="out big"><span class="k">Cash deployed</span><span class="v" id="total">—</span></div>
+    <div class="out"><span class="k">Account total</span><span class="v" id="S">—</span></div>
     <p class="note" id="note" style="display:none"></p>
     <p class="warn" id="warn" style="display:none"></p>
   </div>
 
   <footer>
-    xᵢ = tᵢ·S − wᵢ·C, &nbsp; S = C·(1−Σw)/(1−Σt) over rebalanced items.<br>
-    No-sell holds above-target assets (weight drifts down). Cap drops nearest target (|t−w|/t), then partly funds the last so S−C = cap.
+    Movement xᵢ = (tᵢ − wᵢ)·(S+C), weights over the whole account.<br>
+    Only listed assets trade; the rest is held. S hard-caps net buys; 2 reserved per trade for fees.
   </footer>
 
 <script src="rebalance.js"></script>
