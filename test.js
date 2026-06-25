@@ -159,28 +159,32 @@ console.log("15) Invest buy-only: overweight asset is held, not sold");
   check("no sells", approx(r.sells, 0));
 }
 
-console.log("16) planFromS: invert formula 1 for C, deploy S−C with no leftover");
+console.log("16) planFromS: FULL portfolio (Σt=100%) — no degeneracy, all cash deployed");
 {
-  // S=100; listed A 10→15, B 20→25 (over C / over S); rest held.
-  const r = R.planFromS({ S: 100, fee: 0, noSell: false, rows: P([[10, 15], [20, 25]]) });
-  check("C = S(1−Σt)/(1−Σw) ≈ 85.71", approx(r.C, 100 * 0.6 / 0.7, 0.01));
-  check("A buy ≈ 6.43", r.rows[0].action === "buy" && approx(r.rows[0].x, 6.4286, 0.01));
-  check("B buy ≈ 7.86", approx(r.rows[1].x, 7.8571, 0.01));
-  check("Σx = total to invest (S−C)", approx(r.rows[0].x + r.rows[1].x, r.net, 0.001));
-  check("listed land on target (15%, 25%)", approx(r.rows[0].final, 0.15) && approx(r.rows[1].final, 0.25));
+  // S=10000 total, cash S−C=1000 → C=9000. A 50→60, B 50→40 (w over C, t over S).
+  const r = R.planFromS({ S: 10000, cash: 1000, fee: 0, noSell: false, rows: P([[50, 60], [50, 40]]) });
+  check("C = S − cash = 9000", approx(r.C, 9000));
+  check("A buy 1500", r.rows[0].action === "buy" && approx(r.rows[0].x, 1500));
+  check("B sell 500", r.rows[1].action === "sell" && approx(r.rows[1].x, -500));
+  check("net = cash (1000)", approx(r.net, 1000));
+  check("no leftover", approx(r.leftover, 0));
+  check("land on target 60/40", approx(r.rows[0].final, 0.6) && approx(r.rows[1].final, 0.4));
 }
 
-console.log("17) planFromS: held rest dilutes to (1−Σt), is never traded");
+console.log("17) planFromS: subset — held rest floats, leftover cash reported");
 {
-  const r = R.planFromS({ S: 100, fee: 0, noSell: false, rows: P([[10, 15], [20, 25], [70, null]]) });
-  check("held row not traded", r.rows[2].action === "hold-blank" && r.rows[2].x === 0);
-  check("held rest final ≈ 60% (1−Σt)", approx(r.rows[2].final, 0.60, 0.005));
+  // S=10000, cash 2000 → C=8000. Only A 20→30 listed.
+  const r = R.planFromS({ S: 10000, cash: 2000, fee: 0, noSell: false, rows: P([[20, 30], [40, null]]) });
+  check("A buy = t·S − w·C = 1400", r.rows[0].action === "buy" && approx(r.rows[0].x, 1400));
+  check("held row not traded", r.rows[1].action === "hold-blank" && r.rows[1].x === 0);
+  check("held rest dilutes (w·C/S = 32%)", approx(r.rows[1].final, 0.32));
+  check("leftover cash = 600", approx(r.leftover, 600));
 }
 
-console.log("18) planFromS: needs a held rest (Σw or Σt = 100% → warning)");
+console.log("18) planFromS: warns if it needs more than the cash you're adding");
 {
-  const r = R.planFromS({ S: 100, fee: 0, noSell: false, rows: P([[40, 50], [60, 50]]) });
-  check("no-rest warning", r.warnings.some(w => w.code === "no-rest"));
+  const r = R.planFromS({ S: 10000, cash: 500, fee: 0, noSell: false, rows: P([[20, 30]]) });
+  check("flags needs-more-cash", r.warnings.some(w => w.code === "needs-more-cash"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

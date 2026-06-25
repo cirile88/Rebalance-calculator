@@ -244,29 +244,24 @@
     };
   }
 
-  // Original float-bucket rebalance, parametrised by the FINAL total S instead of C.
-  // Listed assets carry current weight w (over the invested amount C) and target
-  // weight t (over the final total S). The unlisted / blank-target rest is HELD —
-  // never traded — and simply dilutes as cash is added, landing at (1−Σt). Requires
-  // a held rest, i.e. Σw<1 and Σt<1.
-  //   C = S·(1−Σt)/(1−Σw)            (formula 1, inverted to take S as the input)
-  //   xᵢ = tᵢ·S − wᵢ·C               (formula 2; negative = sell)
-  //   total to invest = S − C        (formula 3 = Σ xᵢ exactly, no leftover)
-  // input:  { S, fee, noSell, rows:[{w,t}] }   w,t fractions; t null/""=held
-  // output: { S, C, net, buys, sells, fees, rows:[{i,action,x,fee,final,w,t,hasT}], warnings }
+  // Rebalance with BOTH the final total S and the cash to invest (S − C) given
+  // explicitly, so C = S − (S−C) directly — no division by (1−Σt). This works even
+  // when you list the WHOLE portfolio (Σt = 100%), the case where the inverted
+  // formula was degenerate (0/0). Listed assets carry current weight w (over the
+  // invested amount C) and target weight t (over the final total S); the unlisted /
+  // blank-target rest is held and floats.
+  //   C = S − cash
+  //   xᵢ = tᵢ·S − wᵢ·C               (negative = sell)
+  //   leftover cash = cash − Σ xᵢ    (0 for a full-portfolio rebalance)
+  // input:  { S, cash, fee, noSell, rows:[{w,t}] }   cash = S − C; w,t fractions; t null/""=held
+  // output: { S, C, cash, net, leftover, buys, sells, fees, rows:[...], warnings }
   function planFromS(input) {
-    const S = input.S || 0, fee = input.fee || 0, noSell = !!input.noSell;
+    const S = input.S || 0, cash = input.cash || 0, fee = input.fee || 0, noSell = !!input.noSell;
+    const C = S - cash;
     const norm = input.rows.map((r, i) => {
       const hasT = r.t != null && r.t !== "";
       return { i, w: r.w || 0, hasT, t: hasT ? r.t : 0 };
     });
-    const reb = norm.filter(r => r.hasT);
-    const sw = reb.reduce((a, r) => a + r.w, 0);
-    const st = reb.reduce((a, r) => a + r.t, 0);
-
-    const warnings = [];
-    if (sw >= 1 - EPS || st >= 1 - EPS) warnings.push({ code: "no-rest", value: Math.max(sw, st) });
-    const C = (1 - sw) > EPS ? S * (1 - st) / (1 - sw) : NaN;
 
     let buys = 0, sells = 0, nTrades = 0;
     const rows = norm.map(r => {
@@ -282,10 +277,77 @@
       return { i: r.i, action, x, fee: Math.abs(x) > EPS ? fee : 0, final, w: r.w, t: r.t, hasT: r.hasT };
     });
 
-    return { S, C, net: S - C, buys, sells, fees: nTrades * fee, rows, warnings };
+    const net = buys - sells;
+    const warnings = [];
+    if (C < -EPS) warnings.push({ code: "cash-over-total" });          // S − C < 0
+    if (net > cash + EPS) warnings.push({ code: "needs-more-cash", value: net });
+    return { S, C, cash, net, leftover: cash - net, buys, sells, fees: nTrades * fee, rows, warnings };
   }
 
-  const API = { EPS, TOL, relgap, calcS, solveS, plan, planCash, planInvest, planFromS };
+  // Greedy budget rebalance. Same identity as planFromS — C = S − cash and
+  // xᵢ = tᵢ·S − wᵢ·C — but instead of warning when the buys exceed the cash to
+  // invest (S − C), it RATIONS: sells (if allowed) execute first and add their
+  // proceeds to the budget, then the remaining buys are funded biggest-xᵢ-first.
+  // Each one is filled in full while the budget lasts; the asset that no longer
+  // fits is PARTIALLY filled with whatever cash remains (so S − C is fully used),
+  // and any smaller buys after it are held for lack of cash. A flat `fee` (base
+  // currency) is reserved per executed trade and is itself drawn from the budget.
+  //
+  // input:  { S, cash, fee, noSell, rows:[{w,t}] }   cash = S − C; w,t fractions; t null/""=held
+  // output: { S, C, cash, net, leftover, buys, sells, fees, desiredBuys, rationed,
+  //           finSum, rows:[{ i, action, x, fee, final, w, t, hasT }], warnings }
+  // action ∈ buy | sell | partial | hold-blank | hold-on-target | hold-over | hold-cash
+  function planGreedy(input) {
+    const S = input.S || 0, cash = input.cash || 0, fee = input.fee || 0, noSell = !!input.noSell;
+    const C = S - cash;
+    const norm = input.rows.map((r, i) => {
+      const hasT = r.t != null && r.t !== "";
+      return { i, w: r.w || 0, hasT, t: hasT ? r.t : 0 };
+    });
+
+    const exec = new Map();      // i -> executed signed amount
+    const act = new Map();       // i -> action
+    let budget = cash, fees = 0, buys = 0, sells = 0;
+
+    // Pass 1 — classify; execute sells (when allowed) so their proceeds top up the budget.
+    norm.forEach(r => {
+      if (!r.hasT) { act.set(r.i, "hold-blank"); return; }
+      const x = r.t * S - r.w * C;
+      if (Math.abs(x) <= EPS) { act.set(r.i, "hold-on-target"); }
+      else if (x < 0) {
+        if (noSell) { act.set(r.i, "hold-over"); }
+        else { exec.set(r.i, x); sells += -x; fees += fee; budget += (-x) - fee; act.set(r.i, "sell"); }
+      }
+    });
+
+    // Pass 2 — fund buys, biggest desired xᵢ first.
+    const desired = new Map();
+    norm.forEach(r => { if (r.hasT) { const x = r.t * S - r.w * C; if (x > EPS) desired.set(r.i, x); } });
+    const buyOrder = [...desired.entries()].sort((a, b) => b[1] - a[1]);
+    let desiredBuys = 0;
+    for (const [i, x] of buyOrder) {
+      desiredBuys += x;
+      const room = budget - fee;                 // must also cover this trade's fee
+      if (room <= EPS) { act.set(i, "hold-cash"); continue; }
+      if (room >= x - EPS) { exec.set(i, x); buys += x; fees += fee; budget -= (x + fee); act.set(i, "buy"); }
+      else { exec.set(i, room); buys += room; fees += fee; budget -= (room + fee); act.set(i, "partial"); }
+    }
+
+    let finSum = 0;
+    const rows = norm.map(r => {
+      const x = exec.get(r.i) || 0;
+      const final = (r.w * C + x) / S;
+      finSum += isFinite(final) ? final : 0;
+      return { i: r.i, action: act.get(r.i) || "hold-blank", x, fee: Math.abs(x) > EPS ? fee : 0, final, w: r.w, t: r.t, hasT: r.hasT };
+    });
+
+    const warnings = [];
+    if (C < -EPS) warnings.push({ code: "cash-over-total" });
+    const rationed = rows.some(r => r.action === "partial" || r.action === "hold-cash");
+    return { S, C, cash, net: buys - sells, leftover: Math.max(0, budget), buys, sells, fees, desiredBuys, rationed, finSum, rows, warnings };
+  }
+
+  const API = { EPS, TOL, relgap, calcS, solveS, plan, planCash, planInvest, planFromS, planGreedy };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else global.Rebalance = API;
 })(typeof self !== "undefined" ? self : this);

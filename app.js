@@ -1,10 +1,11 @@
 // DOM wiring: state, persistence, rendering. All math lives in rebalance.js.
 const $ = id => document.getElementById(id);
-const KEY = "rebalc_v5";
+const KEY = "rebalc_v7";
+const BP = 10000; // basis points per 1.0 (100% = 10000 bp)
 const fmt = (n, d = 2) => (isFinite(n) ? n : 0).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 
 const blank = (name = "") => ({ name, w: "", t: "", ccy: "" });
-let state = load() || { S: "", unit: "pct", noSell: true, base: "CHF", rows: [blank("Asset 1"), blank("Asset 2")] };
+let state = load() || { S: "", cash: "", noSell: true, base: "CHF", rows: [blank("Asset 1"), blank("Asset 2")] };
 if (state.noSell === undefined) state.noSell = true;
 if (!state.base) state.base = "CHF";
 
@@ -35,12 +36,14 @@ const conv = (amtBase, ccy) => {
   if (!fxRates || fxRates[ccy] == null) return null;
   return amtBase * fxRates[ccy];
 };
-// Format a base-currency trade, appending the asset-currency order size.
+// Format a trade in the asset's own currency (the order size you place),
+// with the base-currency equivalent shown in parentheses for reference.
 function money(amtBase, ccy) {
   const b = fmt(Math.abs(amtBase)) + " " + state.base;
   if (ccy === state.base) return b;
   const c = conv(Math.abs(amtBase), ccy);
-  return b + (c == null ? "" : " (≈ " + fmt(c) + " " + ccy + ")");
+  if (c == null) return b + " (no " + ccy + " rate)";
+  return fmt(c) + " " + ccy + " (" + b + ")";
 }
 
 function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } }
@@ -48,10 +51,9 @@ function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
 const esc = s => String(s).replace(/"/g, "&quot;");
 const num = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
 const hasTarget = r => String(r.t).trim() !== "";
-const div = () => (state.unit === "pct" ? 100 : 1);
 
 function render() {
-  $("inTotal").value = state.S; $("unit").value = state.unit;
+  $("inTotal").value = state.S; $("inCash").value = state.cash;
   $("base").innerHTML = ccyOptions(state.base);
   $("noSell").checked = !!state.noSell;
   const box = $("rows"); box.innerHTML = "";
@@ -65,9 +67,9 @@ function render() {
         <button class="del" data-del="${i}" aria-label="Remove">×</button>
       </div>
       <div class="fields">
-        <div class="fld"><label>Now w</label>
+        <div class="fld"><label>Now w (bp)</label>
           <input class="num" data-i="${i}" data-k="w" inputmode="decimal" placeholder="0" value="${esc(r.w)}"></div>
-        <div class="fld"><label>Target t</label>
+        <div class="fld"><label>Target t (bp)</label>
           <input class="num" data-i="${i}" data-k="t" inputmode="decimal" placeholder="hold" value="${esc(r.t)}"></div>
       </div>
       <div class="res">
@@ -83,22 +85,20 @@ function render() {
 const FEE = 2; // base-currency buffer reserved per suggested trade (IBKR-style)
 const ACTION_LABEL = {
   "hold-blank": "hold",
-  "hold-nosell": "held — no sell",
-  "hold-cap": "held — cap",
+  "hold-cash": "held — no cash",
   "hold-over": "held — above tgt",
   "hold-on-target": "on target"
 };
 const actionClass = a => (a === "buy" || a === "sell" || a === "partial" ? a : "hold");
 
 function paint() {
-  const d = div();
-  const S = num(state.S);
-  const res = Rebalance.planFromS({
-    S, fee: FEE, noSell: !!state.noSell,
-    rows: state.rows.map(r => ({ w: num(r.w) / d, t: hasTarget(r) ? num(r.t) / d : null }))
+  const S = num(state.S), cash = num(state.cash);
+  const res = Rebalance.planGreedy({
+    S, cash, fee: FEE, noSell: !!state.noSell,
+    rows: state.rows.map(r => ({ w: num(r.w) / BP, t: hasTarget(r) ? num(r.t) / BP : null }))
   });
 
-  const pf = v => (state.unit === "pct" ? fmt(v * 100, 1) + "%" : fmt(v, 3));
+  const pf = v => fmt(v * BP, 0) + " bp";
 
   res.rows.forEach(rr => {
     const i = rr.i, xe = $("x" + i); if (!xe) return;
@@ -121,14 +121,19 @@ function paint() {
     else bt.style.display = "none";
   });
 
-  $("total").textContent = isFinite(res.net) ? (res.net >= 0 ? "+" : "−") + fmt(Math.abs(res.net)) + " " + state.base : "—";
+  const deployed = res.cash - res.leftover; // cash that actually left S−C (= net + fees)
+  const signed = v => (v >= 0 ? "+" : "−") + fmt(Math.abs(v)) + " " + state.base;
+  $("deployed").textContent = isFinite(deployed) ? signed(deployed) : "—";
+  $("net").textContent = isFinite(res.net) ? signed(res.net) : "—";
   $("S").textContent = isFinite(res.S) ? fmt(res.S) + " " + state.base : "—";
   $("sums").innerHTML =
     `<span>invested C ${fmt(res.C)} ${state.base}</span>` +
     `<span>buys ${fmt(res.buys)} · sells ${fmt(res.sells)}</span>` +
-    `<span>fees ${fmt(res.fees)} ${state.base}</span>`;
+    `<span>S−C = net ${fmt(res.net)} + fees ${fmt(res.fees)} + leftover ${fmt(res.leftover)} ${state.base}</span>`;
 
   const notes = [];
+  if (res.rationed)
+    notes.push(`cash short: filled biggest xᵢ first, ${fmt(res.desiredBuys - res.buys)} ${state.base} of buys unfunded`);
   if (state.noSell && res.rows.some(r => r.action === "hold-over"))
     notes.push("buy-only: overweight assets held (not sold)");
   notes.push(`${fmt(FEE)} ${state.base} per trade`);
@@ -138,7 +143,7 @@ function paint() {
   const wb = $("warn");
   const msgs = [];
   (res.warnings || []).forEach(w => {
-    if (w.code === "no-rest") msgs.push(`Leave a held rest: current and target weights must each sum to under 100% (now ${fmt(w.value * 100, 1)}%). List only the subset you're rebalancing.`);
+    if (w.code === "cash-over-total") msgs.push(`Cash to invest exceeds the total S.`);
   });
   if (msgs.length) { wb.style.display = "block"; wb.innerHTML = msgs.map(m => "⚠ " + m).join("<br>"); }
   else wb.style.display = "none";
@@ -147,6 +152,7 @@ function paint() {
 document.addEventListener("input", e => {
   const t = e.target;
   if (t.id === "inTotal") state.S = t.value;
+  else if (t.id === "inCash") state.cash = t.value;
   else if (t.dataset.i != null) {
     const k = t.dataset.k, was = hasTarget(state.rows[+t.dataset.i]);
     state.rows[+t.dataset.i][k] = t.value;
@@ -155,8 +161,7 @@ document.addEventListener("input", e => {
   save(); paint();
 });
 document.addEventListener("change", e => {
-  if (e.target.id === "unit") { state.unit = e.target.value; save(); render(); }
-  else if (e.target.id === "base") { state.base = e.target.value; save(); render(); fetchRates(); }
+  if (e.target.id === "base") { state.base = e.target.value; save(); render(); fetchRates(); }
   else if (e.target.id === "noSell") { state.noSell = e.target.checked; save(); paint(); }
   else if (e.target.dataset.i != null && e.target.dataset.k === "ccy") {
     state.rows[+e.target.dataset.i].ccy = e.target.value; save(); paint();

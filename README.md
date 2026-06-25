@@ -9,35 +9,39 @@ needs no backend.
 
 ## What it does
 
-You enter the **final account total `S`** (the value after the cash you're adding
-is invested) and, for each asset you want to rebalance, its current weight `w`
-(as a % of your **currently invested** amount C), target weight `t` (as a % of the
-**final total** S), and trading currency. The tool returns, per asset:
+You enter the **final account total `S`** (value after the cash is invested), the
+**cash you're adding `S − C`**, and for each asset its current weight `w` (% of your
+**currently invested** amount C), target weight `t` (% of the **final total** S),
+and trading currency. The tool returns, per asset:
 
 - the trade `x = t·S − w·C`, in the base currency, plus its size in the asset's own
   currency (e.g. `buy +1,000 CHF (≈ 1,090 EUR)`),
 - the resulting weight after the trade, shown as a bar with a target tick,
 
-plus the total to invest `S − C` and the invested amount `C` it backed out.
+plus the net deployed and the invested amount `C = S − (S−C)`.
 
-Two design points that matter:
+Giving both `S` and `S − C` (rather than deriving one) means it works for a **full
+portfolio** too: when you list everything, `Σt = 100%` and the old
+`C = S·(1−Σt)/(1−Σw)` form divided by zero — taking `S − C` directly avoids that.
 
-- **Only listed assets are traded; the rest is held.** You can rebalance a subset —
-  unlisted holdings (and rows with a blank target) are never traded; they simply
-  **dilute** to `(1 − Σt)` as the new cash is added. They are never sold and never
-  assumed to be cash.
-- **The whole `S − C` is deployed onto your targets** — there is no leftover. The
-  held rest absorbs the rebalancing by dilution, so the new cash is fully allocated
-  to the listed assets in the proportions your targets imply.
+Two design points:
+
+- **Only listed assets are traded; the rest is held.** Rebalance a subset if you
+  like — unlisted holdings (and blank-target rows) are never traded; they just
+  **dilute** as cash is added. Any cash not absorbed by the listed targets is
+  reported as **leftover**.
+- For a full-portfolio rebalance the whole `S − C` lands on your targets with **no
+  leftover**.
 
 ## Inputs
 
 - **Total after investing (S)** — the account value once the cash is invested.
+- **Cash to invest (S − C)** — the new money you're adding.
 - **Weights as** — enter `w`/`t` as percent or as fractions (0–1).
 - **Base currency** — the currency totals and trades are expressed in.
 - **Now w / Target t / currency** per asset — `w` over the current invested `C`,
-  `t` over the final total `S`. Leave a target **blank to hold** (that asset just
-  dilutes). The per-asset currency only sets how the order size is displayed.
+  `t` over the final total `S`. Leave a target **blank to hold** (it just dilutes).
+  The per-asset currency only sets how the order size is displayed.
 
 ## Currency conversion
 
@@ -62,22 +66,22 @@ estimate, so you can see the round-trip cost of the plan.
 ## The model
 
 Listed assets carry `w` (over the invested amount `C`) and `t` (over the final
-total `S`); the unlisted / blank-target rest is the held bucket. Given the final
-total `S` you enter, the invested amount is backed out and the trades follow:
+total `S`); the unlisted / blank-target rest is the held bucket. With both `S` and
+the cash `S − C` given, nothing is divided:
 
 ```
-C  = S · (1 − Σt) / (1 − Σw)      (formula 1, inverted to take S as the input)
+C  = S − (S − C)
 xᵢ = tᵢ · S − wᵢ · C             (trade for asset i; negative = sell)
-total to invest = S − C          ( = Σ xᵢ exactly — nothing is left undeployed)
+leftover = (S − C) − Σ xᵢ        (0 for a full-portfolio rebalance)
 ```
 
-This needs a held rest: `Σw < 100%` and `Σt < 100%` (list only the subset you're
-rebalancing). The held bucket dilutes to `(1 − Σt)` without being traded.
+The held rest floats to `wᵢ·C / S`. Listing the whole portfolio (`Σw = Σt = 100%`)
+is fine — that's the case the earlier `1 − Σt` denominator couldn't handle.
 
 ## Checks
 
-- Warns if there's no held rest (current or target weights sum to ≥ 100%), since
-  the formula then has no bucket to absorb the rebalancing.
+- Warns if the listed targets need more cash than `S − C` (add more, or lower
+  targets), or if `S − C` exceeds `S`.
 
 ## Files
 

@@ -73,7 +73,7 @@
 </head>
 <body>
   <h1>Rebalance Calculator</h1>
-  <p class="sub">Enter the total (S) after investing. Now w = % of current invested; target t = % of total. Blank = hold; the rest dilutes, untraded.</p>
+  <p class="sub">Enter total (S) and cash to invest (S − C). Weights in basis points (100% = 10000 bp): now w over invested C, target t over total S. Blank target = hold.</p>
 
   <div class="card">
     <div class="two">
@@ -82,11 +82,8 @@
         <input id="inTotal" class="num" inputmode="decimal" placeholder="account total">
       </div>
       <div>
-        <label>Weights as</label>
-        <select id="unit">
-          <option value="pct">Percent (%)</option>
-          <option value="frac">Fraction (0–1)</option>
-        </select>
+        <label>Cash to invest (S − C)</label>
+        <input id="inCash" class="num" inputmode="decimal" placeholder="cash added">
       </div>
     </div>
     <div class="two" style="margin-top:10px">
@@ -94,7 +91,6 @@
         <label>Base currency</label>
         <select id="base"></select>
       </div>
-      <div></div>
     </div>
     <p class="sub" style="margin:8px 0 0;display:flex;align-items:center;gap:8px">
       <span id="fxstatus">loading…</span>
@@ -113,15 +109,16 @@
   </div>
 
   <div class="card">
-    <div class="out big"><span class="k">Total to invest (S − C)</span><span class="v" id="total">—</span></div>
+    <div class="out big"><span class="k">Cash deployed (S−C − leftover)</span><span class="v" id="deployed">—</span></div>
+    <div class="out"><span class="k">Net buys − sells</span><span class="v" id="net">—</span></div>
     <div class="out"><span class="k">Account total (S)</span><span class="v" id="S">—</span></div>
     <p class="note" id="note" style="display:none"></p>
     <p class="warn" id="warn" style="display:none"></p>
   </div>
 
   <footer>
-    C = S·(1−Σt)/(1−Σw), &nbsp; xᵢ = tᵢ·S − wᵢ·C, &nbsp; total to invest = S − C.<br>
-    Only listed assets trade; the held rest dilutes to (1−Σt). 2 reserved per trade for fees.
+    C = S − (S−C), &nbsp; xᵢ = tᵢ·S − wᵢ·C.<br>
+    If Σ(buys) &gt; S−C, fund the biggest xᵢ first, then the next, partial-filling the last until S−C is used up. Sells (when allowed) free up cash first. 2 per trade for fees.
   </footer>
 
 <script src="rebalance.js"></script>
