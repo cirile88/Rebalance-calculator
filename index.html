@@ -73,31 +73,28 @@
 </head>
 <body>
   <h1>Rebalance Calculator</h1>
-  <p class="sub">Weights are over your whole account (S + C). Blank target = hold. Unlisted holdings stay put.</p>
+  <p class="sub">Enter the total (S) after investing. Now w = % of current invested; target t = % of total. Blank = hold; the rest dilutes, untraded.</p>
 
   <div class="card">
     <div class="two">
       <div>
-        <label>Total after cash (S + C)</label>
-        <input id="inT" class="num" inputmode="decimal" placeholder="account total">
+        <label>Total after investing (S)</label>
+        <input id="inTotal" class="num" inputmode="decimal" placeholder="account total">
       </div>
       <div>
-        <label>Cash to invest (S)</label>
-        <input id="inS" class="num" inputmode="decimal" placeholder="budget">
-      </div>
-    </div>
-    <div class="two" style="margin-top:10px">
-      <div>
-        <label>Targets as</label>
+        <label>Weights as</label>
         <select id="unit">
           <option value="pct">Percent (%)</option>
           <option value="frac">Fraction (0–1)</option>
         </select>
       </div>
+    </div>
+    <div class="two" style="margin-top:10px">
       <div>
         <label>Base currency</label>
         <select id="base"></select>
       </div>
+      <div></div>
     </div>
     <p class="sub" style="margin:8px 0 0;display:flex;align-items:center;gap:8px">
       <span id="fxstatus">loading…</span>
@@ -116,15 +113,15 @@
   </div>
 
   <div class="card">
-    <div class="out big"><span class="k">Cash deployed</span><span class="v" id="total">—</span></div>
-    <div class="out"><span class="k">Account total</span><span class="v" id="S">—</span></div>
+    <div class="out big"><span class="k">Total to invest (S − C)</span><span class="v" id="total">—</span></div>
+    <div class="out"><span class="k">Account total (S)</span><span class="v" id="S">—</span></div>
     <p class="note" id="note" style="display:none"></p>
     <p class="warn" id="warn" style="display:none"></p>
   </div>
 
   <footer>
-    Movement xᵢ = (tᵢ − wᵢ)·(S+C), weights over the whole account.<br>
-    Only listed assets trade; the rest is held. S hard-caps net buys; 2 reserved per trade for fees.
+    C = S·(1−Σt)/(1−Σw), &nbsp; xᵢ = tᵢ·S − wᵢ·C, &nbsp; total to invest = S − C.<br>
+    Only listed assets trade; the held rest dilutes to (1−Σt). 2 reserved per trade for fees.
   </footer>
 
 <script src="rebalance.js"></script>

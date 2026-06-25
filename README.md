@@ -9,36 +9,35 @@ needs no backend.
 
 ## What it does
 
-You enter your **whole account total** `S + C` (the value after any cash you're
-adding), the **cash to invest** `S`, and for each asset you want to rebalance its
-current weight `w`, target weight `t`, and trading currency — all weights expressed
-over the full account, exactly as a broker like IBKR shows them. The tool returns,
-per asset:
+You enter the **final account total `S`** (the value after the cash you're adding
+is invested) and, for each asset you want to rebalance, its current weight `w`
+(as a % of your **currently invested** amount C), target weight `t` (as a % of the
+**final total** S), and trading currency. The tool returns, per asset:
 
-- the trade `x = (t − w)·(S+C)`, in the base currency, plus its size in the asset's
-  own currency (e.g. `buy +1,000 CHF (≈ 1,090 EUR)`),
+- the trade `x = t·S − w·C`, in the base currency, plus its size in the asset's own
+  currency (e.g. `buy +1,000 CHF (≈ 1,090 EUR)`),
 - the resulting weight after the trade, shown as a bar with a target tick,
 
-plus the cash actually deployed and the account total afterwards.
+plus the total to invest `S − C` and the invested amount `C` it backed out.
 
 Two design points that matter:
 
-- **Only listed assets are traded; everything else is held.** You can rebalance a
-  subset — unlisted holdings (and rows with a blank target) are never touched and
-  are never assumed to be cash.
-- **`S` is a hard budget.** If your targets would need more new cash than `S`
-  (after reserving fees), the buys are scaled down proportionally to fit, and a
-  warning is shown.
+- **Only listed assets are traded; the rest is held.** You can rebalance a subset —
+  unlisted holdings (and rows with a blank target) are never traded; they simply
+  **dilute** to `(1 − Σt)` as the new cash is added. They are never sold and never
+  assumed to be cash.
+- **The whole `S − C` is deployed onto your targets** — there is no leftover. The
+  held rest absorbs the rebalancing by dilution, so the new cash is fully allocated
+  to the listed assets in the proportions your targets imply.
 
 ## Inputs
 
-- **Total after cash (S + C)** — the account value once your new cash is in it.
-- **Cash to invest (S)** — the budget; net buys won't exceed it.
-- **Targets as** — enter `w`/`t` as percent or as fractions (0–1).
+- **Total after investing (S)** — the account value once the cash is invested.
+- **Weights as** — enter `w`/`t` as percent or as fractions (0–1).
 - **Base currency** — the currency totals and trades are expressed in.
-- **Now w / Target t / currency** per asset, all weights **over the full account**.
-  Leave a target **blank to hold**. The per-asset currency only sets how the order
-  size is displayed; the math is unchanged.
+- **Now w / Target t / currency** per asset — `w` over the current invested `C`,
+  `t` over the final total `S`. Leave a target **blank to hold** (that asset just
+  dilutes). The per-asset currency only sets how the order size is displayed.
 
 ## Currency conversion
 
@@ -52,38 +51,40 @@ the redirect drops CORS headers, which fails the fetch in the browser.
 
 ## Fees
 
-A flat **2 (base currency) is reserved per suggested trade** as a commission
-buffer, deducted from the budget `S` before sizing buys, so the plan never spends
-cash it doesn't have on fees.
+A flat **2 (base currency) per suggested trade** is reported as a commission
+estimate, so you can see the round-trip cost of the plan.
 
 ## Options
 
-- **Avoid selling (buy-only).** Any asset above its target can't be sold; it is
-  held (shown as "held — above tgt") and only the underweight assets are bought.
+- **Avoid selling (buy-only).** Any listed asset above its target isn't sold; it is
+  held (shown as "held — above tgt") and lets its weight drift.
 
 ## The model
 
-All weights are over the full account total `T = S + C`. For each listed asset:
+Listed assets carry `w` (over the invested amount `C`) and `t` (over the final
+total `S`); the unlisted / blank-target rest is the held bucket. Given the final
+total `S` you enter, the invested amount is backed out and the trades follow:
 
 ```
-xᵢ = (tᵢ − wᵢ) · T            (trade for asset i; negative = sell)
+C  = S · (1 − Σt) / (1 − Σw)      (formula 1, inverted to take S as the input)
+xᵢ = tᵢ · S − wᵢ · C             (trade for asset i; negative = sell)
+total to invest = S − C          ( = Σ xᵢ exactly — nothing is left undeployed)
 ```
 
-Unlisted assets (and blank-target rows) are held. Net new cash = Σ buys − Σ sells.
-If that exceeds the budget `S` (after fees), every buy is multiplied by
-`(S − fees + sells) / buys` so the net spend equals `S` exactly.
+This needs a held rest: `Σw < 100%` and `Σt < 100%` (list only the subset you're
+rebalancing). The held bucket dilutes to `(1 − Σt)` without being traded.
 
 ## Checks
 
-- Warns when targets need more new cash than the budget `S` (buys are scaled to
-  fit), and if any single target exceeds 100% of the account.
+- Warns if there's no held rest (current or target weights sum to ≥ 100%), since
+  the formula then has no bucket to absorb the rebalancing.
 
 ## Files
 
 - `index.html` — markup and styling only.
-- `rebalance.js` — the pure math (`planInvest`, plus the older `plan`/`planCash`).
-  No DOM; runs in the browser and in Node, so the page and tests share logic.
-- `app.js` — DOM wiring: reads inputs, calls `Rebalance.planInvest`, renders.
+- `rebalance.js` — the pure math (`planFromS`, plus the older `plan`/`planCash`/
+  `planInvest`). No DOM; runs in the browser and in Node, so page and tests share it.
+- `app.js` — DOM wiring: reads inputs, calls `Rebalance.planFromS`, renders.
 - `test.js` — Node tests over `rebalance.js`.
 
 No build step — the browser loads the two scripts directly.

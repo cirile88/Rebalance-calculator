@@ -244,7 +244,48 @@
     };
   }
 
-  const API = { EPS, TOL, relgap, calcS, solveS, plan, planCash, planInvest };
+  // Original float-bucket rebalance, parametrised by the FINAL total S instead of C.
+  // Listed assets carry current weight w (over the invested amount C) and target
+  // weight t (over the final total S). The unlisted / blank-target rest is HELD —
+  // never traded — and simply dilutes as cash is added, landing at (1−Σt). Requires
+  // a held rest, i.e. Σw<1 and Σt<1.
+  //   C = S·(1−Σt)/(1−Σw)            (formula 1, inverted to take S as the input)
+  //   xᵢ = tᵢ·S − wᵢ·C               (formula 2; negative = sell)
+  //   total to invest = S − C        (formula 3 = Σ xᵢ exactly, no leftover)
+  // input:  { S, fee, noSell, rows:[{w,t}] }   w,t fractions; t null/""=held
+  // output: { S, C, net, buys, sells, fees, rows:[{i,action,x,fee,final,w,t,hasT}], warnings }
+  function planFromS(input) {
+    const S = input.S || 0, fee = input.fee || 0, noSell = !!input.noSell;
+    const norm = input.rows.map((r, i) => {
+      const hasT = r.t != null && r.t !== "";
+      return { i, w: r.w || 0, hasT, t: hasT ? r.t : 0 };
+    });
+    const reb = norm.filter(r => r.hasT);
+    const sw = reb.reduce((a, r) => a + r.w, 0);
+    const st = reb.reduce((a, r) => a + r.t, 0);
+
+    const warnings = [];
+    if (sw >= 1 - EPS || st >= 1 - EPS) warnings.push({ code: "no-rest", value: Math.max(sw, st) });
+    const C = (1 - sw) > EPS ? S * (1 - st) / (1 - sw) : NaN;
+
+    let buys = 0, sells = 0, nTrades = 0;
+    const rows = norm.map(r => {
+      let x = 0, action, final;
+      if (!r.hasT) { action = "hold-blank"; final = r.w * C / S; }
+      else {
+        x = r.t * S - r.w * C;
+        if (noSell && x < -EPS) { x = 0; action = "hold-over"; final = r.w * C / S; }
+        else if (Math.abs(x) <= EPS) { action = "hold-on-target"; final = r.t; }
+        else { action = x > 0 ? "buy" : "sell"; final = r.t; }
+      }
+      if (x > EPS) { buys += x; nTrades++; } else if (x < -EPS) { sells += -x; nTrades++; }
+      return { i: r.i, action, x, fee: Math.abs(x) > EPS ? fee : 0, final, w: r.w, t: r.t, hasT: r.hasT };
+    });
+
+    return { S, C, net: S - C, buys, sells, fees: nTrades * fee, rows, warnings };
+  }
+
+  const API = { EPS, TOL, relgap, calcS, solveS, plan, planCash, planInvest, planFromS };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else global.Rebalance = API;
 })(typeof self !== "undefined" ? self : this);

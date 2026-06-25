@@ -1,10 +1,10 @@
 // DOM wiring: state, persistence, rendering. All math lives in rebalance.js.
 const $ = id => document.getElementById(id);
-const KEY = "rebalc_v4";
+const KEY = "rebalc_v5";
 const fmt = (n, d = 2) => (isFinite(n) ? n : 0).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 
 const blank = (name = "") => ({ name, w: "", t: "", ccy: "" });
-let state = load() || { T: "", S: "", unit: "pct", noSell: true, base: "CHF", rows: [blank("Asset 1"), blank("Asset 2")] };
+let state = load() || { S: "", unit: "pct", noSell: true, base: "CHF", rows: [blank("Asset 1"), blank("Asset 2")] };
 if (state.noSell === undefined) state.noSell = true;
 if (!state.base) state.base = "CHF";
 
@@ -51,7 +51,7 @@ const hasTarget = r => String(r.t).trim() !== "";
 const div = () => (state.unit === "pct" ? 100 : 1);
 
 function render() {
-  $("inT").value = state.T; $("inS").value = state.S; $("unit").value = state.unit;
+  $("inTotal").value = state.S; $("unit").value = state.unit;
   $("base").innerHTML = ccyOptions(state.base);
   $("noSell").checked = !!state.noSell;
   const box = $("rows"); box.innerHTML = "";
@@ -92,9 +92,9 @@ const actionClass = a => (a === "buy" || a === "sell" || a === "partial" ? a : "
 
 function paint() {
   const d = div();
-  const T = num(state.T), S = num(state.S);
-  const res = Rebalance.planInvest({
-    T, S, fee: FEE, noSell: !!state.noSell,
+  const S = num(state.S);
+  const res = Rebalance.planFromS({
+    S, fee: FEE, noSell: !!state.noSell,
     rows: state.rows.map(r => ({ w: num(r.w) / d, t: hasTarget(r) ? num(r.t) / d : null }))
   });
 
@@ -121,33 +121,32 @@ function paint() {
     else bt.style.display = "none";
   });
 
-  $("total").textContent = isFinite(res.net) ? "+" + fmt(res.net) + " " + state.base : "—";
+  $("total").textContent = isFinite(res.net) ? (res.net >= 0 ? "+" : "−") + fmt(Math.abs(res.net)) + " " + state.base : "—";
   $("S").textContent = isFinite(res.S) ? fmt(res.S) + " " + state.base : "—";
   $("sums").innerHTML =
-    `<span>budget ${fmt(res.budget)} · need ${fmt(res.desiredNet)}</span>` +
+    `<span>invested C ${fmt(res.C)} ${state.base}</span>` +
     `<span>buys ${fmt(res.buys)} · sells ${fmt(res.sells)}</span>` +
-    `<span>fees ${fmt(res.fees)} · cash left ${fmt(res.cashAfter)} ${state.base}</span>`;
+    `<span>fees ${fmt(res.fees)} ${state.base}</span>`;
 
   const notes = [];
   if (state.noSell && res.rows.some(r => r.action === "hold-over"))
     notes.push("buy-only: overweight assets held (not sold)");
-  notes.push(`${fmt(FEE)} ${state.base} reserved per trade`);
+  notes.push(`${fmt(FEE)} ${state.base} per trade`);
   const nb = $("note");
   if (notes.length) { nb.style.display = "block"; nb.textContent = notes.join(" · "); } else nb.style.display = "none";
 
   const wb = $("warn");
   const msgs = [];
-  if (res.mode === "over-budget")
-    msgs.push(`Targets need ${fmt(res.desiredNet)} ${state.base} but your budget S is ${fmt(res.budget)} (fees ${fmt(res.fees)}). Buys scaled down to fit.`);
-  (res.warnings || []).forEach(w => { if (w.code === "target-over") msgs.push(`A target exceeds 100% of the total.`); });
+  (res.warnings || []).forEach(w => {
+    if (w.code === "no-rest") msgs.push(`Leave a held rest: current and target weights must each sum to under 100% (now ${fmt(w.value * 100, 1)}%). List only the subset you're rebalancing.`);
+  });
   if (msgs.length) { wb.style.display = "block"; wb.innerHTML = msgs.map(m => "⚠ " + m).join("<br>"); }
   else wb.style.display = "none";
 }
 
 document.addEventListener("input", e => {
   const t = e.target;
-  if (t.id === "inT") state.T = t.value;
-  else if (t.id === "inS") state.S = t.value;
+  if (t.id === "inTotal") state.S = t.value;
   else if (t.dataset.i != null) {
     const k = t.dataset.k, was = hasTarget(state.rows[+t.dataset.i]);
     state.rows[+t.dataset.i][k] = t.value;

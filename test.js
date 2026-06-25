@@ -159,5 +159,29 @@ console.log("15) Invest buy-only: overweight asset is held, not sold");
   check("no sells", approx(r.sells, 0));
 }
 
+console.log("16) planFromS: invert formula 1 for C, deploy S−C with no leftover");
+{
+  // S=100; listed A 10→15, B 20→25 (over C / over S); rest held.
+  const r = R.planFromS({ S: 100, fee: 0, noSell: false, rows: P([[10, 15], [20, 25]]) });
+  check("C = S(1−Σt)/(1−Σw) ≈ 85.71", approx(r.C, 100 * 0.6 / 0.7, 0.01));
+  check("A buy ≈ 6.43", r.rows[0].action === "buy" && approx(r.rows[0].x, 6.4286, 0.01));
+  check("B buy ≈ 7.86", approx(r.rows[1].x, 7.8571, 0.01));
+  check("Σx = total to invest (S−C)", approx(r.rows[0].x + r.rows[1].x, r.net, 0.001));
+  check("listed land on target (15%, 25%)", approx(r.rows[0].final, 0.15) && approx(r.rows[1].final, 0.25));
+}
+
+console.log("17) planFromS: held rest dilutes to (1−Σt), is never traded");
+{
+  const r = R.planFromS({ S: 100, fee: 0, noSell: false, rows: P([[10, 15], [20, 25], [70, null]]) });
+  check("held row not traded", r.rows[2].action === "hold-blank" && r.rows[2].x === 0);
+  check("held rest final ≈ 60% (1−Σt)", approx(r.rows[2].final, 0.60, 0.005));
+}
+
+console.log("18) planFromS: needs a held rest (Σw or Σt = 100% → warning)");
+{
+  const r = R.planFromS({ S: 100, fee: 0, noSell: false, rows: P([[40, 50], [60, 50]]) });
+  check("no-rest warning", r.warnings.some(w => w.code === "no-rest"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
