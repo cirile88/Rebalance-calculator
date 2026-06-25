@@ -9,12 +9,12 @@ needs no backend.
 
 ## What it does
 
-For each asset you enter its current **value in its own currency** and a target
-weight `t`. The tool converts every holding to a single base currency using live
-exchange rates, derives the current weights and portfolio total `C` for you, and
-returns per asset:
+You enter the portfolio value `C` in a base currency, then for each asset its
+current weight `w`, a target weight `t`, and the currency you trade it in. The
+tool returns, per asset:
 
-- the trade `x` (buy / sell amount), in the base currency,
+- the trade `x` (buy / sell amount), in the base currency, plus its size in the
+  asset's own currency (e.g. `buy +1,000 CHF (≈ 1,090 EUR)`),
 - the resulting weight after the trade, shown as a bar with a target tick so you
   can see where you land,
 
@@ -22,21 +22,42 @@ plus the total cash to deploy and the portfolio value afterwards.
 
 ## Inputs
 
-- **Base currency** — the currency all values, totals and trades are expressed in.
-- **Targets as** — enter `t` as percent or as fractions (0–1).
-- **Value + Cur / Target t** per asset. The value is in the asset's own currency;
-  the app converts it to the base currency to compute weights and the total `C`.
-  Leave a target **blank to hold** the asset (it is never traded; its weight
-  simply drifts as the rest changes).
+- **C** — current invested amount (portfolio total), in the base currency.
+- **Weights as** — enter `w`/`t` as percent or as fractions (0–1).
+- **Base currency** — the currency `C` and `S` are expressed in.
+- **Now w / Target t / currency** per asset. Leave a target **blank to hold** the
+  asset (it is never traded; its weight simply drifts as the rest changes). The
+  per-asset currency only sets how the order size is shown; the math is unchanged.
 
 ## Currency conversion
 
-Rates are fetched live from [frankfurter.app](https://frankfurter.app) (free, no
-API key) when the page loads and whenever you change the base currency. The last
-rates are cached on the device, so a cached set is used if you are briefly
-offline; the rate date is shown under the base-currency selector. Because weights
-are derived from converted values, they always sum to 100% — the old
-"weights must sum to 100%" check is no longer needed.
+Rates are fetched live from [frankfurter.dev](https://frankfurter.dev) (ECB daily
+rates, free, no API key, CORS-enabled) when the page loads, when you change the
+base currency, or via the ↻ refresh button. They convert each trade from the base
+currency into the asset's own currency for display only — so if rates are
+unavailable, totals and trades are still correct, just shown in the base currency.
+The `.dev` host is used directly because the older `.app` host 301-redirects and
+the redirect drops CORS headers, which fails the fetch in the browser.
+
+## Uninvested cash (IBKR deposits)
+
+Brokers like IBKR compute each holding's weight over the **whole account**, so a
+fresh cash deposit makes the listed weights sum to **less than 100%** by design —
+the gap is uninvested cash. When the entered weights sum to under 100% (beyond the
+0.5pp tolerance), the tool switches to a **cash-deployment** model:
+
+- the gap `(1 − Σw)·C` is treated as cash to deploy, not a held position;
+- deployment is **buy-only** — it funds under-target assets; over-target assets are
+  held (they can't be sold), so they show as "held — above tgt";
+- the **total is unchanged** (no external money assumed); "Total to invest" is the
+  cash actually deployed;
+- a flat **2 (base currency) buffer is reserved per suggested trade** to cover
+  commissions, so the plan doesn't push your cash negative on fees;
+- if the cash can't fund every target, the **most-underweight** asset is funded
+  first and the last is partially funded ("cash short" note).
+
+This replaces the old "weights must sum to 100%" warning, which fired spuriously on
+broker weights and could suggest wrong (often under-deployed) trades.
 
 ## Options
 

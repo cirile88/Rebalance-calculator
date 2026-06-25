@@ -119,27 +119,72 @@
     };
   }
 
-  // Convert per-asset native amounts into base-currency value C and weights.
-  // rows:  [{ amt, ccy }]  amt in its own currency; ccy is an ISO code.
-  // rates: { CCY: units-of-CCY-per-1-base }  (frankfurter `from=base` shape).
-  // The base currency itself need not appear in rates (its rate is 1).
-  // Returns { C, vals:[base-value per row], weights:[w per row], missing:[ccy,…] }.
-  function weightsFromAmounts(rows, rates, base) {
-    rates = rates || {};
-    const missing = [];
-    const vals = rows.map(r => {
-      const amt = r.amt || 0;
-      if (r.ccy === base) return amt;
-      const rate = rates[r.ccy];
-      if (!isFinite(rate) || rate <= 0) { if (r.ccy) missing.push(r.ccy); return NaN; }
-      return amt / rate; // amt(ccy) / (ccy per base) = base
+  // Cash-deployment model (e.g. you just deposited cash into the account).
+  // Weights w are over the FULL account incl. uninvested cash, so they sum to
+  // <100%; the gap (1−Σw) is cash to deploy. Deployment is BUY-ONLY into
+  // under-target assets, the total is unchanged (no external money), and a flat
+  // `fee` (base currency) is reserved per suggested trade. If cash can't fund
+  // every underweight, the most-underweight is funded first and the last is
+  // partially funded; over-target assets are simply held (can't sell).
+  //
+  // input:  { C, fee, rows:[{ w, t }] }   w,t fractions of the full account; t null/""=hold
+  // output: { S, deployed, fees, cash, cashAfter, finSum, wSum, mode,
+  //           rows:[{ i, action, x, fee, final, w, t, hasT }], warnings:[{code,value}] }
+  // action ∈ buy | partial | hold-over | hold-blank | hold-on-target
+  function planCash(input) {
+    const C = input.C, fee = input.fee || 0;
+    const norm = input.rows.map((r, i) => {
+      const hasT = r.t != null && r.t !== "";
+      return { i, w: r.w || 0, hasT, t: hasT ? r.t : 0 };
     });
-    const C = vals.reduce((a, v) => a + (isFinite(v) ? v : 0), 0);
-    const weights = vals.map(v => (C > 0 && isFinite(v) ? v / C : 0));
-    return { C, vals, weights, missing: Array.from(new Set(missing)) };
+    const wSum = norm.reduce((a, r) => a + r.w, 0);
+    const tSum = norm.reduce((a, r) => a + (r.hasT ? r.t : 0), 0);
+    const cash = Math.max(0, 1 - wSum) * C;
+
+    // Under-target assets, most-underweight (largest relative gap) funded first.
+    const cands = norm
+      .filter(r => r.hasT && (r.t * C - r.w * C) > EPS)
+      .map(r => ({ r, need: r.t * C - r.w * C, rg: relgap({ w: r.w, t: r.t }) }))
+      .sort((a, b) => b.rg - a.rg);
+
+    let budget = cash, fees = 0;
+    const buy = new Map();
+    for (const c of cands) {
+      if (budget <= EPS) break;
+      const maxBuy = budget - fee;          // need to cover the trade's fee too
+      if (maxBuy <= EPS) break;
+      const x = Math.min(c.need, maxBuy);
+      buy.set(c.r.i, x);
+      fees += fee; budget -= (x + fee);
+      if (x < c.need - EPS) break;           // partial fund exhausts the budget
+    }
+
+    const Sfinal = C - fees;                  // fees leave the account
+    const cashAfter = budget;
+    let deployed = 0, finSum = 0;
+    const rows = norm.map(r => {
+      const x = buy.get(r.i) || 0;
+      let action;
+      if (!r.hasT) action = "hold-blank";
+      else if (x > EPS) action = (x < (r.t * C - r.w * C) - EPS) ? "partial" : "buy";
+      else if (r.w > r.t + EPS) action = "hold-over";       // overweight, can't sell
+      else action = "hold-on-target";
+      deployed += x;
+      const final = (r.w * C + x) / Sfinal;
+      finSum += final;
+      return { i: r.i, action, x, fee: x > EPS ? fee : 0, final, w: r.w, t: r.t, hasT: r.hasT };
+    });
+    finSum += cashAfter / Sfinal;             // remaining uninvested cash
+
+    const warnings = [];
+    if (tSum > 1 + EPS) warnings.push({ code: "targets-over", value: tSum });
+    const shortfall = cands.reduce((a, c) => a + c.need, 0) - deployed;
+    const mode = shortfall > EPS ? "cash-short" : "cash";
+
+    return { S: Sfinal, deployed, fees, cash, cashAfter, finSum, wSum, mode, rows, warnings };
   }
 
-  const API = { EPS, TOL, relgap, calcS, solveS, plan, weightsFromAmounts };
+  const API = { EPS, TOL, relgap, calcS, solveS, plan, planCash };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   else global.Rebalance = API;
 })(typeof self !== "undefined" ? self : this);

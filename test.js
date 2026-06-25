@@ -68,40 +68,44 @@ console.log("6) Targets > 100% → over-100 warning");
   check("targets-over warning present", r.warnings.some(w => w.code === "targets-over"));
 }
 
-console.log("7) weightsFromAmounts: multi-currency → base value + weights");
+console.log("7) Cash deploy (fee 0): weights sum <100%, gap funds buys to target");
 {
-  // rates are CCY-per-1-base (frankfurter from=base). Base=CHF.
-  const rates = { EUR: 1.0842, USD: 1.2298 };
-  const rows = [
-    { amt: 1000, ccy: "CHF" },   // 1000 CHF
-    { amt: 1084.2, ccy: "EUR" }, // /1.0842 = 1000 CHF
-    { amt: 1229.8, ccy: "USD" }  // /1.2298 = 1000 CHF
-  ];
-  const c = R.weightsFromAmounts(rows, rates, "CHF");
-  check("C ≈ 3000 CHF", approx(c.C, 3000, 0.5));
-  check("equal weights ≈ 1/3", approx(c.weights[0], 1 / 3) && approx(c.weights[1], 1 / 3));
-  check("base row uses rate 1", approx(c.vals[0], 1000));
-  check("no missing currencies", c.missing.length === 0);
+  // A 40→60, B 30→40, 30% cash; no fee → cash (3000) exactly hits both targets.
+  const r = R.planCash({ C: 10000, fee: 0, rows: P([[40, 60], [30, 40]]) });
+  check("A full buy 2000", r.rows[0].action === "buy" && approx(r.rows[0].x, 2000));
+  check("B full buy 1000", r.rows[1].action === "buy" && approx(r.rows[1].x, 1000));
+  check("deployed = cash (3000)", approx(r.deployed, 3000));
+  check("no external cash, S = C", approx(r.S, 10000));
+  check("cash fully used", approx(r.cashAfter, 0));
+  check("mode cash (not short)", r.mode === "cash");
 }
 
-console.log("8) weightsFromAmounts: unknown currency flagged + excluded");
+console.log("8) Cash deploy with 2/trade fee: fee reserved, last trade partial");
 {
-  const c = R.weightsFromAmounts(
-    [{ amt: 100, ccy: "CHF" }, { amt: 100, ccy: "XYZ" }], {}, "CHF");
-  check("XYZ reported missing", c.missing.length === 1 && c.missing[0] === "XYZ");
-  check("C only counts known (100)", approx(c.C, 100));
-  check("known asset weight = 100%", approx(c.weights[0], 1));
+  const r = R.planCash({ C: 10000, fee: 2, rows: P([[40, 60], [30, 40]]) });
+  check("A full buy 2000", approx(r.rows[0].x, 2000) && r.rows[0].fee === 2);
+  check("B partial 996 (fees ate 4)", r.rows[1].action === "partial" && approx(r.rows[1].x, 996));
+  check("total fees = 4", approx(r.fees, 4));
+  check("S = C − fees", approx(r.S, 9996));
+  check("flagged cash-short", r.mode === "cash-short");
 }
 
-console.log("9) Derived weights feed plan cleanly (no weights-sum warning)");
+console.log("9) Overweight asset is held (buy-only, no selling)");
 {
-  const rates = { EUR: 1.0842 };
-  const c = R.weightsFromAmounts(
-    [{ amt: 5000, ccy: "CHF" }, { amt: 5421, ccy: "EUR" }], rates, "CHF");
-  const r = R.plan({ C: c.C, noSell: false, capOn: false, cap: 0,
-    rows: [{ w: c.weights[0], t: 0.5 }, { w: c.weights[1], t: 0.5 }] });
-  check("no weights-sum warning", r.warnings.every(w => w.code !== "weights-sum"));
-  check("net ≈ 0 (already balanced)", approx(r.net, 0, 1));
+  // A 70→60 (over), B 10→40 (under), 20% cash.
+  const r = R.planCash({ C: 10000, fee: 2, rows: P([[70, 60], [10, 40]]) });
+  check("A held (overweight)", r.rows[0].action === "hold-over" && r.rows[0].x === 0);
+  check("B partially funded by 2000 cash", r.rows[1].action === "partial" && approx(r.rows[1].x, 1998));
+  check("only one fee charged", approx(r.fees, 2));
+}
+
+console.log("10) Blank target holds; cash buffer kept when targets < 100%");
+{
+  // A 50 hold, B 30→40, 20% cash; B needs 1000, cash 2000 → 1000 left as buffer.
+  const r = R.planCash({ C: 10000, fee: 0, rows: P([[50, null], [30, 40]]) });
+  check("A hold-blank", r.rows[0].action === "hold-blank" && r.rows[0].x === 0);
+  check("B buys to target", r.rows[1].action === "buy" && approx(r.rows[1].x, 1000));
+  check("leftover cash buffer ≈ 1000", approx(r.cashAfter, 1000));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
