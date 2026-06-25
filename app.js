@@ -7,7 +7,9 @@ const fmt = (n, d = 2) => (isFinite(n) ? n : 0).toLocaleString(undefined, { maxi
 const CCYS = ["CHF", "EUR", "USD", "GBP", "JPY", "AUD", "CAD", "CNY", "SEK", "NOK",
   "DKK", "SGD", "HKD", "NZD", "PLN", "CZK", "HUF", "INR", "KRW", "MXN",
   "BRL", "ZAR", "TRY", "ILS", "RON", "IDR", "ISK", "MYR", "PHP", "THB"];
-const FX_URL = base => "https://api.frankfurter.app/latest?from=" + encodeURIComponent(base);
+// Hit the .dev host directly: the .app host 301-redirects here and the redirect
+// response drops CORS headers, which fails the cross-origin fetch in browsers.
+const FX_URL = base => "https://api.frankfurter.dev/v1/latest?base=" + encodeURIComponent(base);
 
 const blank = (name = "") => ({ name, amt: "", ccy: state ? state.base : "CHF", t: "" });
 let state = load() || {
@@ -140,7 +142,8 @@ async function fetchRates(base) {
     const r = await fetch(FX_URL(base));
     if (!r.ok) throw new Error("http " + r.status);
     const j = await r.json();
-    state.fx = { base: j.base, date: j.date, rates: j.rates };
+    const rates = j.rates || {}; rates[base] = 1;
+    state.fx = { base, date: j.date, rates };
     save(); paint();
   } catch (e) {
     if (state.fx && state.fx.base === base)
@@ -167,6 +170,7 @@ document.addEventListener("change", e => {
   else if (t.id === "capOn") { state.capOn = t.checked; save(); render(); }
   else if (t.id === "noSell") { state.noSell = t.checked; save(); paint(); }
 });
+const fxref = $("fxref"); if (fxref) fxref.onclick = () => fetchRates(state.base);
 $("add").onclick = () => { state.rows.push(blank("Asset " + (state.rows.length + 1))); save(); render(); };
 document.addEventListener("click", e => {
   if (e.target.dataset.del != null) { state.rows.splice(+e.target.dataset.del, 1); save(); render(); }

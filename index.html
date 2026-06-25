@@ -93,7 +93,12 @@
     <div class="out" style="margin-top:10px;border-bottom:none;padding-bottom:0">
       <span class="k">Current invested (C)</span><span class="v" id="C">—</span>
     </div>
-    <p class="sub" id="fxnote" style="margin:6px 0 0">Loading rates…</p>
+    <p class="sub" style="margin:6px 0 0;display:flex;align-items:center;gap:8px">
+      <span id="fxnote">Loading rates…</span>
+      <button id="fxref" type="button" title="Refresh rates"
+        style="background:var(--pill);border:1px solid var(--line);color:var(--accent);
+               border-radius:8px;padding:2px 8px;font-size:13px;cursor:pointer">↻</button>
+    </p>
   </div>
 
   <div class="card">
